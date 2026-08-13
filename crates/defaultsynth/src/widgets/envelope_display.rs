@@ -261,7 +261,8 @@ impl View for EnvelopeDisplay {
                 }
                 meta.consume();
             }
-            WindowEvent::MouseOut => self.end_drag(cx),
+            // No MouseOut handler: the pointer is expected to leave the well while
+            // dragging a handle, and `cx.capture()` keeps delivering events anyway.
             _ => {}
         });
     }

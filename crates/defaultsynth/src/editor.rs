@@ -1,10 +1,9 @@
 //! VIZIA editor.
 //!
-//! This is the panel skeleton for the reference design: title bar, the three OSC
-//! panels, noise, both filters, the amp envelope and voicing. Custom-drawn
-//! widgets (the waveform wells, envelope and LFO editors, the circular knobs)
-//! come next; every control here is already bound to a real parameter so the
-//! layout can be checked against a host while the visuals are built up.
+//! Heights are budgeted explicitly rather than left to `auto`. VIZIA clips
+//! overflowing children instead of shrinking them, so every row's size has to
+//! add up to the window: 3 OSC panels + the bottom strip must fit inside the
+//! main area, or the last row of knobs silently disappears.
 
 use nih_plug::prelude::*;
 use nih_plug_vizia::vizia::prelude::*;
@@ -13,11 +12,25 @@ use nih_plug_vizia::{assets, create_vizia_editor, ViziaState, ViziaTheming};
 use std::sync::Arc;
 
 use crate::params::{DefaultSynthParams, OscParams};
-use crate::widgets::{EnvelopeDisplay, Knob, WaveDisplay};
+use crate::widgets::{EnvelopeDisplay, Knob, PowerDot, WaveDisplay};
 
-/// Matches the 4:3-ish proportions of the reference design.
+/// Height of one dial plus its readout and caption.
+const KNOB_CELL: f32 = 78.0;
+/// Height of one OSC panel. Three of these plus the bottom strip fill the window.
+const OSC_PANEL: f32 = 166.0;
+/// Height of the NOISE / FILTER strip along the bottom.
+const BOTTOM_STRIP: f32 = 160.0;
+/// Height of the branding row above the panels.
+const TITLE_BAR: f32 = 50.0;
+
+/// Window size.
+///
+/// Height matters more than it looks: a 125%-scaled 1080p desktop only offers
+/// about 816 logical pixels of working area, and asking for more makes the OS
+/// clamp the window while VIZIA keeps laying out at the requested size, which
+/// silently crops the bottom panels. The panel constants above add up to this.
 pub fn default_state() -> Arc<ViziaState> {
-    ViziaState::new(|| (1180, 860))
+    ViziaState::new(|| (1280, 760))
 }
 
 #[derive(Lens)]
@@ -38,6 +51,7 @@ pub fn create(params: Arc<DefaultSynthParams>, state: Arc<ViziaState>) -> Option
 
         VStack::new(cx, |cx| {
             title_bar(cx);
+
             HStack::new(cx, |cx| {
                 VStack::new(cx, |cx| {
                     osc_panel(cx, "OSC A", |params| &params.osc_a);
@@ -45,16 +59,17 @@ pub fn create(params: Arc<DefaultSynthParams>, state: Arc<ViziaState>) -> Option
                     osc_panel(cx, "OSC C", |params| &params.osc_c);
                 })
                 .row_between(Pixels(8.0))
-                .width(Percentage(54.0));
+                .width(Percentage(56.0));
 
                 VStack::new(cx, |cx| {
-                    amp_env_panel(cx);
+                    env_panel(cx);
                     voicing_panel(cx);
                 })
                 .row_between(Pixels(8.0))
                 .width(Stretch(1.0));
             })
-            .col_between(Pixels(8.0));
+            .col_between(Pixels(8.0))
+            .height(Pixels(OSC_PANEL * 3.0 + 16.0));
 
             HStack::new(cx, |cx| {
                 noise_panel(cx);
@@ -62,7 +77,7 @@ pub fn create(params: Arc<DefaultSynthParams>, state: Arc<ViziaState>) -> Option
                 filter_panel(cx, "FILTER B", false);
             })
             .col_between(Pixels(8.0))
-            .height(Pixels(200.0));
+            .height(Pixels(BOTTOM_STRIP));
         })
         .class("synth-root");
     })
@@ -76,182 +91,100 @@ fn title_bar(cx: &mut Context) {
             Element::new(cx).class("brand-underline");
         })
         .row_between(Pixels(4.0))
-        .width(Auto);
+        .width(Pixels(210.0));
 
-        // Spacer pushes the master control to the right edge.
         Element::new(cx).width(Stretch(1.0));
 
-        VStack::new(cx, |cx| {
-            Label::new(cx, "MASTER").class("knob-label");
-            ParamSlider::new(cx, EditorData::params, |params| &params.master_gain).class("param-slider");
-        })
-        .width(Pixels(150.0))
-        .row_between(Pixels(3.0));
+        knob_cell(cx, "MASTER", |params| &params.master_gain);
     })
     .class("title-bar")
-    .height(Pixels(54.0));
+    .height(Pixels(TITLE_BAR))
+    .col_between(Pixels(12.0));
 }
 
-/// One OSC panel. `select` picks which of the three parameter groups it drives.
+/// Panel heading: the lit dot, the title, and an optional trailing control.
+fn panel_header(cx: &mut Context, title: &str, trailing: impl Fn(&mut Context) + 'static) {
+    HStack::new(cx, move |cx| {
+        Label::new(cx, title).class("panel-title").width(Pixels(76.0));
+        Element::new(cx).width(Stretch(1.0));
+        trailing(cx);
+    })
+    .class("panel-header")
+    .height(Pixels(24.0))
+    .col_between(Pixels(8.0));
+}
+
 fn osc_panel(
     cx: &mut Context,
-    title: &str,
+    title: &'static str,
     select: impl Fn(&Arc<DefaultSynthParams>) -> &OscParams + Copy + 'static,
 ) {
-    VStack::new(cx, |cx| {
-        HStack::new(cx, |cx| {
-            ParamButton::new(cx, EditorData::params, move |params| &select(params).enabled)
-                .class("power-dot")
-                .width(Pixels(17.0))
-                .height(Pixels(17.0));
-            Label::new(cx, title).class("panel-title");
+    VStack::new(cx, move |cx| {
+        HStack::new(cx, move |cx| {
+            PowerDot::new(cx, EditorData::params, move |params| &select(params).enabled)
+                .class("power-dot");
+            Label::new(cx, title).class("panel-title").width(Pixels(66.0));
             Element::new(cx).width(Stretch(1.0));
             ParamSlider::new(cx, EditorData::params, move |params| &select(params).waveform)
+                .set_style(ParamSliderStyle::CurrentStep { even: true })
                 .class("selector")
-                .width(Pixels(120.0));
+                .width(Pixels(140.0));
         })
         .class("panel-header")
+        .height(Pixels(24.0))
         .col_between(Pixels(8.0));
 
-        // Waveform well on the left, dials on the right, as in the design.
-        HStack::new(cx, |cx| {
+        HStack::new(cx, move |cx| {
             WaveDisplay::new(
                 cx,
                 EditorData::params.map(move |params| select(params).waveform.value().to_dsp()),
                 EditorData::params.map(move |params| select(params).warp.value()),
             )
             .class("display-well")
-            .width(Pixels(196.0));
+            .width(Pixels(190.0))
+            .height(Stretch(1.0));
 
+            // One knob row, not two: a second row does not fit in the height the
+            // screen allows, so the pitch and routing values sit in the inset
+            // boxes above instead.
             VStack::new(cx, move |cx| {
                 HStack::new(cx, move |cx| {
                     readout(cx, "OCT", move |params| &select(params).octave);
                     readout(cx, "FINE", move |params| &select(params).fine);
                     readout(cx, "UNISON", move |params| &select(params).unison);
+                    readout(cx, "RAND", move |params| &select(params).phase_random);
+                    readout(cx, "A / B", move |params| &select(params).filter_send);
+                    toggle_cell(cx, "FILTER", move |params| &select(params).filter_enabled);
                 })
                 .col_between(Pixels(4.0))
-                .height(Auto);
+                .height(Pixels(30.0));
 
                 HStack::new(cx, move |cx| {
                     knob_cell(cx, "DETUNE", move |params| &select(params).detune);
                     knob_cell(cx, "BLEND", move |params| &select(params).blend);
                     knob_cell(cx, "WARP", move |params| &select(params).warp);
                     knob_cell(cx, "PHASE", move |params| &select(params).phase);
-                })
-                .col_between(Pixels(2.0))
-                .height(Auto);
-
-                HStack::new(cx, move |cx| {
-                    knob_cell(cx, "RAND", move |params| &select(params).phase_random);
                     knob_cell(cx, "PAN", move |params| &select(params).pan);
                     knob_cell(cx, "VOLUME", move |params| &select(params).level);
-                    knob_cell(cx, "FILTER", move |params| &select(params).filter_send);
                 })
                 .col_between(Pixels(2.0))
-                .height(Auto);
+                .height(Pixels(KNOB_CELL));
             })
-            .row_between(Pixels(6.0))
+            .row_between(Pixels(4.0))
             .width(Stretch(1.0));
         })
         .col_between(Pixels(9.0))
         .height(Stretch(1.0));
     })
-    .class("panel");
-}
-
-/// Compact inset numeric field, like the design's OCT / FINE / UNISON boxes.
-fn readout<P, FMap>(cx: &mut Context, label: &'static str, select: FMap)
-where
-    P: nih_plug::prelude::Param + 'static,
-    FMap: Fn(&Arc<DefaultSynthParams>) -> &P + Copy + 'static,
-{
-    VStack::new(cx, move |cx| {
-        ParamSlider::new(cx, EditorData::params, select).class("readout");
-        Label::new(cx, label).class("readout-label");
-    })
-    .row_between(Pixels(2.0))
-    .width(Stretch(1.0))
-    .height(Auto);
-}
-
-fn filter_panel(cx: &mut Context, title: &str, is_a: bool) {
-    VStack::new(cx, |cx| {
-        HStack::new(cx, |cx| {
-            if is_a {
-                ParamButton::new(cx, EditorData::params, |params| &params.filter_a.enabled).class("power-dot");
-            } else {
-                ParamButton::new(cx, EditorData::params, |params| &params.filter_b.enabled).class("power-dot");
-            }
-            Label::new(cx, title).class("panel-title");
-        })
-        .class("panel-header")
-        .col_between(Pixels(8.0));
-
-        // The two filters carry identical controls; the branch only picks the group.
-        if is_a {
-            filter_controls(cx, |params| &params.filter_a.mode, |params| &params.filter_a.cutoff, |params| &params.filter_a.resonance, |params| &params.filter_a.env_amount);
-        } else {
-            filter_controls(cx, |params| &params.filter_b.mode, |params| &params.filter_b.cutoff, |params| &params.filter_b.resonance, |params| &params.filter_b.env_amount);
-            // F1 exists only on filter B: it is the series-routing input that takes
-            // filter A's output. Filter A has no equivalent, since feeding a filter
-            // its own output would be a loop.
-            labelled(cx, "INPUT F1", |cx| {
-                ParamButton::new(cx, EditorData::params, |params| &params.filter_b.input_from_filter_a)
-                    .class("param-slider");
-            });
-        }
-    })
     .class("panel")
-    .width(Stretch(1.0));
+    .height(Pixels(OSC_PANEL));
 }
 
-fn filter_controls(
-    cx: &mut Context,
-    mode: impl Fn(&Arc<DefaultSynthParams>) -> &EnumParam<crate::params::FilterModeParam> + Copy + 'static,
-    cutoff: impl Fn(&Arc<DefaultSynthParams>) -> &FloatParam + Copy + 'static,
-    resonance: impl Fn(&Arc<DefaultSynthParams>) -> &FloatParam + Copy + 'static,
-    env_amount: impl Fn(&Arc<DefaultSynthParams>) -> &FloatParam + Copy + 'static,
-) {
-    VStack::new(cx, move |cx| {
-        ParamSlider::new(cx, EditorData::params, mode).class("selector");
-        HStack::new(cx, move |cx| {
-            knob_cell(cx, "CUT", cutoff);
-            knob_cell(cx, "RES", resonance);
-            knob_cell(cx, "ENV", env_amount);
-        })
-        .col_between(Pixels(2.0))
-        .height(Auto);
-    })
-    .row_between(Pixels(6.0));
-}
-
-fn noise_panel(cx: &mut Context) {
+fn env_panel(cx: &mut Context) {
     VStack::new(cx, |cx| {
-        HStack::new(cx, |cx| {
-            ParamButton::new(cx, EditorData::params, |params| &params.noise.enabled).class("power-dot");
-            Label::new(cx, "NOISE").class("panel-title");
-        })
-        .class("panel-header")
-        .col_between(Pixels(8.0));
-
-        ParamSlider::new(cx, EditorData::params, |params| &params.noise.colour).class("selector");
-        HStack::new(cx, |cx| {
-            knob_cell(cx, "LEVEL", |params| &params.noise.level);
-            knob_cell(cx, "PAN", |params| &params.noise.pan);
-        })
-        .col_between(Pixels(2.0))
-        .height(Auto);
-    })
-    .class("panel")
-    .width(Stretch(1.0));
-}
-
-fn amp_env_panel(cx: &mut Context) {
-    VStack::new(cx, |cx| {
-        HStack::new(cx, |cx| {
-            Label::new(cx, "ENV 1 · AMP").class("panel-title");
-        })
-        .class("panel-header");
+        panel_header(cx, "ENV 1 · AMP", |cx| {
+            Label::new(cx, "드래그하여 편집").class("status-line");
+        });
 
         EnvelopeDisplay::new(cx, EditorData::params, |params| &params.amp_env)
             .class("display-well")
@@ -265,61 +198,132 @@ fn amp_env_panel(cx: &mut Context) {
             knob_cell(cx, "RELEASE", |params| &params.amp_env.release);
         })
         .col_between(Pixels(2.0))
-        .height(Auto);
+        .height(Pixels(KNOB_CELL));
     })
-    .class("panel");
+    .class("panel")
+    .height(Pixels(OSC_PANEL * 2.0 + 8.0));
 }
 
 fn voicing_panel(cx: &mut Context) {
     VStack::new(cx, |cx| {
-        HStack::new(cx, |cx| {
-            Label::new(cx, "VOICING").class("panel-title");
-        })
-        .class("panel-header");
+        panel_header(cx, "VOICING", |cx| {
+            ParamSlider::new(cx, EditorData::params, |params| &params.voicing.mode)
+                .set_style(ParamSliderStyle::CurrentStep { even: true })
+                .class("selector")
+                .width(Pixels(150.0));
+        });
 
         HStack::new(cx, |cx| {
-            labelled(cx, "MODE", |cx| {
-                ParamSlider::new(cx, EditorData::params, |params| &params.voicing.mode).class("selector");
-            });
             readout(cx, "POLY", |params| &params.voicing.polyphony);
-            labelled(cx, "ALWAYS", |cx| {
-                ParamButton::new(cx, EditorData::params, |params| &params.voicing.always_glide).class("param-slider");
-            });
+            toggle_cell(cx, "ALWAYS GLIDE", |params| &params.voicing.always_glide);
         })
-        .col_between(Pixels(6.0))
-        .height(Auto);
+        .col_between(Pixels(5.0))
+        .height(Pixels(34.0));
 
         HStack::new(cx, |cx| {
             knob_cell(cx, "PORTA", |params| &params.voicing.portamento);
             knob_cell(cx, "VELO", |params| &params.voicing.velocity_curve);
-            knob_cell(cx, "MASTER", |params| &params.master_gain);
+            // Filter-envelope depth lives here so the second envelope has a home
+            // until the ENV 2 tab exists.
+            knob_cell(cx, "F.ENV A", |params| &params.filter_a.env_amount);
         })
         .col_between(Pixels(2.0))
-        .height(Auto);
+        .height(Pixels(KNOB_CELL));
     })
-    .class("panel");
+    .class("panel")
+    .height(Pixels(OSC_PANEL - 8.0));
 }
 
-/// Caption-above-control cell, the layout used throughout the design.
-fn labelled(cx: &mut Context, label: &str, content: impl Fn(&mut Context) + 'static) {
-    VStack::new(cx, move |cx| {
-        Label::new(cx, label).class("knob-label");
-        content(cx);
+fn noise_panel(cx: &mut Context) {
+    VStack::new(cx, |cx| {
+        HStack::new(cx, |cx| {
+            PowerDot::new(cx, EditorData::params, |params| &params.noise.enabled).class("power-dot");
+            Label::new(cx, "NOISE").class("panel-title");
+        })
+        .class("panel-header")
+        .height(Pixels(24.0))
+        .col_between(Pixels(8.0));
+
+        ParamSlider::new(cx, EditorData::params, |params| &params.noise.colour)
+            .set_style(ParamSliderStyle::CurrentStep { even: true })
+            .class("selector")
+            .height(Pixels(26.0));
+
+        HStack::new(cx, |cx| {
+            knob_cell(cx, "LEVEL", |params| &params.noise.level);
+            knob_cell(cx, "PAN", |params| &params.noise.pan);
+        })
+        .col_between(Pixels(2.0))
+        .height(Pixels(KNOB_CELL));
     })
-    .row_between(Pixels(3.0))
+    .class("panel")
+    .row_between(Pixels(6.0))
     .width(Stretch(1.0));
 }
 
-/// Dial with its readout and caption underneath, as drawn throughout the design.
+fn filter_panel(cx: &mut Context, title: &'static str, is_a: bool) {
+    VStack::new(cx, move |cx| {
+        HStack::new(cx, move |cx| {
+            if is_a {
+                PowerDot::new(cx, EditorData::params, |params| &params.filter_a.enabled).class("power-dot");
+            } else {
+                PowerDot::new(cx, EditorData::params, |params| &params.filter_b.enabled).class("power-dot");
+            }
+            Label::new(cx, title).class("panel-title").width(Pixels(78.0));
+            Element::new(cx).width(Stretch(1.0));
+            if is_a {
+                ParamSlider::new(cx, EditorData::params, |params| &params.filter_a.mode)
+                    .set_style(ParamSliderStyle::CurrentStep { even: true })
+                    .class("selector")
+                    .width(Pixels(150.0));
+            } else {
+                ParamSlider::new(cx, EditorData::params, |params| &params.filter_b.mode)
+                    .set_style(ParamSliderStyle::CurrentStep { even: true })
+                    .class("selector")
+                    .width(Pixels(150.0));
+            }
+        })
+        .class("panel-header")
+        .height(Pixels(24.0))
+        .col_between(Pixels(8.0));
+
+        HStack::new(cx, move |cx| {
+            if is_a {
+                knob_cell(cx, "CUT", |params| &params.filter_a.cutoff);
+                knob_cell(cx, "RES", |params| &params.filter_a.resonance);
+                knob_cell(cx, "KEY", |params| &params.filter_a.keytrack);
+            } else {
+                knob_cell(cx, "CUT", |params| &params.filter_b.cutoff);
+                knob_cell(cx, "RES", |params| &params.filter_b.resonance);
+                knob_cell(cx, "KEY", |params| &params.filter_b.keytrack);
+            }
+        })
+        .col_between(Pixels(2.0))
+        .height(Pixels(KNOB_CELL));
+
+        // F1 is filter B's series input, taking filter A's output. Filter A has no
+        // equivalent because feeding a filter its own output would be a loop.
+        if is_a {
+            Label::new(cx, "오실레이터 A / B 슬라이더로 입력을 배분합니다").class("status-line");
+        } else {
+            toggle_cell(cx, "INPUT F1", |params| &params.filter_b.input_from_filter_a);
+        }
+    })
+    .class("panel")
+    .row_between(Pixels(6.0))
+    .width(Stretch(1.0));
+}
+
+/// Dial with its readout and caption underneath.
 fn knob_cell<P, FMap>(cx: &mut Context, label: &'static str, select: FMap)
 where
-    P: nih_plug::prelude::Param + 'static,
+    P: Param + 'static,
     FMap: Fn(&Arc<DefaultSynthParams>) -> &P + Copy + 'static,
 {
     VStack::new(cx, move |cx| {
-        Knob::new(cx, EditorData::params, select).class("dial");
-        // The readout tracks the parameter's own formatter, so it picks up units
-        // and the custom pan/gain strings for free.
+        Knob::new(cx, EditorData::params, select);
+        // The readout uses the parameter's own formatter, so units and the custom
+        // pan and gain strings come along for free.
         Label::new(
             cx,
             EditorData::params.map(move |params| {
@@ -330,5 +334,40 @@ where
         .class("knob-value");
         Label::new(cx, label).class("knob-label");
     })
-    .class("knob-cell");
+    .class("knob-cell")
+    .height(Pixels(KNOB_CELL));
+}
+
+/// Compact inset numeric field, like the design's OCT / FINE / UNISON boxes.
+fn readout<P, FMap>(cx: &mut Context, label: &'static str, select: FMap)
+where
+    P: Param + 'static,
+    FMap: Fn(&Arc<DefaultSynthParams>) -> &P + Copy + 'static,
+{
+    VStack::new(cx, move |cx| {
+        ParamSlider::new(cx, EditorData::params, select)
+            .set_style(ParamSliderStyle::CurrentStep { even: true })
+            .class("readout")
+            .height(Pixels(22.0));
+        Label::new(cx, label).class("readout-label");
+    })
+    .row_between(Pixels(2.0))
+    .width(Stretch(1.0))
+    .height(Pixels(34.0));
+}
+
+fn toggle_cell<FMap>(cx: &mut Context, label: &'static str, select: FMap)
+where
+    FMap: Fn(&Arc<DefaultSynthParams>) -> &BoolParam + Copy + 'static,
+{
+    VStack::new(cx, move |cx| {
+        ParamButton::new(cx, EditorData::params, select)
+            .with_label(label)
+            .class("toggle")
+            .height(Pixels(22.0));
+        Element::new(cx).height(Pixels(10.0));
+    })
+    .row_between(Pixels(2.0))
+    .width(Stretch(1.0))
+    .height(Pixels(34.0));
 }

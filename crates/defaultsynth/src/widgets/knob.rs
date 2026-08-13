@@ -142,9 +142,10 @@ impl View for Knob {
                 self.param_base.end_set_parameter(cx);
                 meta.consume();
             }
-            // The pointer can leave the window mid-gesture; without this the knob
-            // would stay latched to the mouse after the button is released.
-            WindowEvent::MouseOut => self.end_drag(cx),
+            // Deliberately no MouseOut handler. `cx.capture()` already routes every
+            // mouse event here for the duration of the gesture, and MouseOut fires
+            // the moment the pointer crosses the knob's own edge, so releasing on
+            // it would cut the drag short after a few pixels of travel.
             _ => {}
         });
     }
