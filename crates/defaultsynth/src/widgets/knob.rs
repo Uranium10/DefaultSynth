@@ -206,10 +206,25 @@ impl View for Knob {
             canvas.stroke_path(&path, &paint);
         }
 
-        // Dial body.
+        // Dial body. The design shades each dial with a diagonal three-stop
+        // gradient running from the lower right up to the upper left, which is
+        // what gives it its brushed-metal look; a flat fill reads as a dead disc.
         let mut path = vg::Path::new();
         path.circle(centre_x, centre_y, body_radius);
-        canvas.fill_path(&path, &vg::Paint::color(body));
+        let from = (centre_x + body_radius, centre_y + body_radius);
+        let to = (centre_x - body_radius, centre_y - body_radius);
+        let paint = vg::Paint::linear_gradient_stops(
+            from.0,
+            from.1,
+            to.0,
+            to.1,
+            [
+                (0.0, shade(body, DIAL_GRADIENT[0], opacity)),
+                (0.5, shade(body, DIAL_GRADIENT[1], opacity)),
+                (1.0, shade(body, DIAL_GRADIENT[2], opacity)),
+            ],
+        );
+        canvas.fill_path(&path, &paint);
 
         // Pointer line from just outside the hub to the rim.
         let mut path = vg::Path::new();
@@ -223,8 +238,23 @@ impl View for Knob {
     }
 }
 
+/// The dial's three gradient stops, taken from Synth.svg (`#CACACA`, `#DDDDDD`,
+/// `#EEEEEE`), expressed relative to the lightest one so the CSS
+/// `background-color` still sets the dial's overall tone.
+const DIAL_GRADIENT: [f32; 3] = [0xCA as f32 / 0xEE as f32, 0xDD as f32 / 0xEE as f32, 1.0];
+
 fn colour(source: impl Into<vg::Color>, opacity: f32) -> vg::Color {
     let mut colour: vg::Color = source.into();
     colour.set_alphaf(colour.a * opacity);
     colour
+}
+
+/// Scales a colour's brightness, keeping its hue.
+fn shade(base: vg::Color, factor: f32, opacity: f32) -> vg::Color {
+    vg::Color::rgbaf(
+        (base.r * factor).clamp(0.0, 1.0),
+        (base.g * factor).clamp(0.0, 1.0),
+        (base.b * factor).clamp(0.0, 1.0),
+        base.a * opacity,
+    )
 }

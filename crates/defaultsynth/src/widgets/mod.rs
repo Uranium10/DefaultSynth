@@ -5,11 +5,13 @@
 //! the canvas directly.
 
 mod envelope_display;
+mod field;
 mod knob;
 mod power_dot;
 mod wave_display;
 
 pub use envelope_display::EnvelopeDisplay;
+pub use field::Field;
 pub use knob::Knob;
 pub use power_dot::PowerDot;
 pub use wave_display::WaveDisplay;
