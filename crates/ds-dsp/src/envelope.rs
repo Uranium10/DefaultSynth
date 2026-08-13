@@ -29,6 +29,44 @@ impl Default for EnvelopeSettings {
     }
 }
 
+/// Exponential curvature shared by every stage.
+///
+/// After this many time constants a stage is within ~0.7% of its target, which
+/// is close enough to call it arrived.
+const CURVE: f32 = 5.0;
+
+/// Normalised exponential fall from 1 to ~0 across a stage.
+///
+/// Both the decay and the release are this shape, just scaled to different
+/// start and end levels.
+pub fn exp_fall(progress: f32) -> f32 {
+    (-CURVE * progress.clamp(0.0, 1.0)).exp()
+}
+
+impl EnvelopeSettings {
+    /// Level partway through a stage, where `progress` runs 0..1 across it.
+    ///
+    /// [`Envelope::process`] is driven by this, and so is the editor's curve
+    /// display. Keeping one definition is what stops the drawn envelope and the
+    /// audible one from drifting apart as the curves are tuned.
+    pub fn stage_level(&self, stage: Stage, progress: f32) -> f32 {
+        let t = progress.clamp(0.0, 1.0);
+        match stage {
+            Stage::Idle => 0.0,
+            // A zero-length stage is already at its destination.
+            Stage::Attack if self.attack <= f32::EPSILON => 1.0,
+            Stage::Attack => 1.0 - exp_fall(t),
+            Stage::Hold => 1.0,
+            Stage::Decay if self.decay <= f32::EPSILON => self.sustain,
+            Stage::Decay => self.sustain + (1.0 - self.sustain) * exp_fall(t),
+            Stage::Sustain => self.sustain,
+            Stage::Release if self.release <= f32::EPSILON => 0.0,
+            // Releasing from the sustain level, which is where a held note sits.
+            Stage::Release => self.sustain * exp_fall(t),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Envelope {
     stage: Stage,
@@ -102,16 +140,11 @@ impl Envelope {
         match self.stage {
             Stage::Idle => self.value = 0.0,
             Stage::Attack => {
-                if settings.attack <= f32::EPSILON {
+                // Inverted exponential: fast at first, easing into the peak.
+                self.value = settings.stage_level(Stage::Attack, elapsed / settings.attack);
+                if elapsed >= settings.attack {
                     self.value = 1.0;
                     self.advance(Stage::Hold);
-                } else {
-                    // Inverted exponential: fast at first, easing into the peak.
-                    self.value = 1.0 - (-5.0 * elapsed / settings.attack).exp();
-                    if elapsed >= settings.attack {
-                        self.value = 1.0;
-                        self.advance(Stage::Hold);
-                    }
                 }
             }
             Stage::Hold => {
@@ -121,29 +154,25 @@ impl Envelope {
                 }
             }
             Stage::Decay => {
-                if settings.decay <= f32::EPSILON {
+                self.value = settings.stage_level(Stage::Decay, elapsed / settings.decay);
+                if elapsed >= settings.decay {
                     self.value = settings.sustain;
                     self.advance(Stage::Sustain);
-                } else {
-                    let progress = (-5.0 * elapsed / settings.decay).exp();
-                    self.value = settings.sustain + (1.0 - settings.sustain) * progress;
-                    if elapsed >= settings.decay {
-                        self.value = settings.sustain;
-                        self.advance(Stage::Sustain);
-                    }
                 }
             }
             Stage::Sustain => self.value = settings.sustain,
             Stage::Release => {
-                if settings.release <= f32::EPSILON {
+                // Falls from wherever the note actually was, so releasing mid-attack
+                // does not jump up to the sustain level first. Same curve the
+                // display draws, only anchored to a different starting level.
+                self.value = if settings.release <= f32::EPSILON {
+                    0.0
+                } else {
+                    self.release_from * exp_fall(elapsed / settings.release)
+                };
+                if elapsed >= settings.release {
                     self.value = 0.0;
                     self.stage = Stage::Idle;
-                } else {
-                    self.value = self.release_from * (-5.0 * elapsed / settings.release).exp();
-                    if elapsed >= settings.release {
-                        self.value = 0.0;
-                        self.stage = Stage::Idle;
-                    }
                 }
             }
         }
@@ -252,6 +281,71 @@ mod tests {
             }
             let value = env.process(&config);
             assert!((0.0..=1.0).contains(&value), "envelope left range: {value}");
+        }
+    }
+
+    #[test]
+    fn stage_level_matches_what_the_running_envelope_produces() {
+        // The editor draws from stage_level while the audio comes from process().
+        // If these ever disagree the displayed envelope becomes a lie.
+        let config = EnvelopeSettings { attack: 0.2, hold: 0.0, decay: 0.4, sustain: 0.35, release: 0.3 };
+        let sample_rate = 48_000.0;
+        let mut env = Envelope::default();
+        env.set_sample_rate(sample_rate);
+        env.trigger();
+
+        // Sample the attack a quarter of the way in.
+        let attack_samples = (config.attack * sample_rate * 0.25) as usize;
+        for _ in 0..attack_samples {
+            env.process(&config);
+        }
+        let expected = config.stage_level(Stage::Attack, 0.25);
+        assert!((env.value() - expected).abs() < 1e-3, "attack drifted: {} vs {expected}", env.value());
+
+        // And the decay, halfway through.
+        while env.stage() == Stage::Attack || env.stage() == Stage::Hold {
+            env.process(&config);
+        }
+        let decay_samples = (config.decay * sample_rate * 0.5) as usize;
+        for _ in 0..decay_samples {
+            env.process(&config);
+        }
+        let expected = config.stage_level(Stage::Decay, 0.5);
+        assert!((env.value() - expected).abs() < 1e-3, "decay drifted: {} vs {expected}", env.value());
+    }
+
+    #[test]
+    fn release_still_rings_out_when_sustain_is_zero() {
+        // A percussive patch sustains at zero but must still release from whatever
+        // level the decay left behind rather than cutting off instantly.
+        let config = EnvelopeSettings { attack: 0.0, hold: 0.0, decay: 4.0, sustain: 0.0, release: 0.5 };
+        let mut env = Envelope::default();
+        env.set_sample_rate(48_000.0);
+        env.trigger();
+        for _ in 0..2_000 {
+            env.process(&config);
+        }
+        let before = env.value();
+        assert!(before > 0.5, "test setup should release from a high level, got {before}");
+
+        env.release();
+        let first = env.process(&config);
+        assert!(first > before * 0.9, "release cut off instantly: {first} from {before}");
+
+        for _ in 0..24_000 {
+            env.process(&config);
+        }
+        assert!(env.is_finished(), "release never completed");
+    }
+
+    #[test]
+    fn stage_level_stays_normalised_everywhere() {
+        let config = EnvelopeSettings { attack: 1.0, hold: 0.5, decay: 2.0, sustain: 0.4, release: 1.5 };
+        for stage in [Stage::Idle, Stage::Attack, Stage::Hold, Stage::Decay, Stage::Sustain, Stage::Release] {
+            for step in 0..=20 {
+                let value = config.stage_level(stage, step as f32 / 20.0);
+                assert!((0.0..=1.0).contains(&value), "{stage:?} produced {value}");
+            }
         }
     }
 

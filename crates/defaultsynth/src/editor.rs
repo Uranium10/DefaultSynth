@@ -13,7 +13,7 @@ use nih_plug_vizia::{assets, create_vizia_editor, ViziaState, ViziaTheming};
 use std::sync::Arc;
 
 use crate::params::{DefaultSynthParams, OscParams};
-use crate::widgets::{Knob, WaveDisplay};
+use crate::widgets::{EnvelopeDisplay, Knob, WaveDisplay};
 
 /// Matches the 4:3-ish proportions of the reference design.
 pub fn default_state() -> Arc<ViziaState> {
@@ -253,8 +253,9 @@ fn amp_env_panel(cx: &mut Context) {
         })
         .class("panel-header");
 
-        // Placeholder for the draggable envelope curve editor in the design.
-        Element::new(cx).class("display-well").height(Pixels(150.0));
+        EnvelopeDisplay::new(cx, EditorData::params, |params| &params.amp_env)
+            .class("display-well")
+            .height(Stretch(1.0));
 
         HStack::new(cx, |cx| {
             knob_cell(cx, "ATTACK", |params| &params.amp_env.attack);

@@ -132,6 +132,18 @@ wave-display {
     color: #29c8f5;
 }
 
+/*
+ * Envelope editor. selection-color is the curve and the handle rings,
+ * color fills the handle centres, border-color draws the stage dividers.
+ */
+envelope-display {
+    background-color: #4a4a4a;
+    border-radius: 8px;
+    color: #eaf7fc;
+    selection-color: #29c8f5;
+    border-color: #9aa4a8;
+}
+
 .param-slider {
     height: 22px;
     border-radius: 4px;
