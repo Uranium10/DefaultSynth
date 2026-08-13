@@ -11,7 +11,9 @@ authors = ["DefaultSynth"]
 [workspace.dependencies]
 # NIH-plug itself is ISC, but its VST3 bindings are GPLv3. Exporting VST3 therefore
 # makes the whole plugin GPLv3; the CLAP export carries no such condition.
-nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", features = ["assert_process_allocs"] }
+# `standalone` adds the CPAL/MIDI-backed desktop target, so the synth can be run
+# and played without a host installed.
+nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", features = ["assert_process_allocs", "standalone"] }
 nih_plug_vizia = { git = "https://github.com/robbert-vdh/nih-plug.git" }
 
 # Release builds are what actually run in a host's audio callback, so optimise hard.

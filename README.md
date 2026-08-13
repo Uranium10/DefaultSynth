@@ -32,8 +32,62 @@ Windows에서는 `build.bat`을 쓰면 빌드 캐시를 작업공간 밖(`C:\tmp
 
 ### 설치
 
-CLAP은 `%COMMONPROGRAMFILES%\CLAP\`, VST3는 `%COMMONPROGRAMFILES%\VST3\`에 복사하면
-호스트가 인식합니다.
+호스트는 정해진 폴더만 스캔합니다. 아래에 통째로 복사하세요. `.vst3`는 파일이 아니라
+**폴더**이므로 폴더째 옮겨야 합니다.
+
+**전체 사용자** (관리자 권한 필요)
+
+| 포맷 | 경로 |
+| --- | --- |
+| CLAP | `C:\Program Files\Common Files\CLAP\` |
+| VST3 | `C:\Program Files\Common Files\VST3\` |
+
+**현재 사용자만** (권한 불필요, 권장)
+
+| 포맷 | 경로 |
+| --- | --- |
+| CLAP | `%LOCALAPPDATA%\Programs\Common\CLAP\` |
+| VST3 | `%LOCALAPPDATA%\Programs\Common\VST3\` |
+
+```bat
+mkdir "%LOCALAPPDATA%\Programs\Common\CLAP" 2>nul
+mkdir "%LOCALAPPDATA%\Programs\Common\VST3" 2>nul
+copy /Y "%CARGO_TARGET_DIR%\bundled\DefaultSynth.clap" "%LOCALAPPDATA%\Programs\Common\CLAP\"
+xcopy /E /I /Y "%CARGO_TARGET_DIR%\bundled\DefaultSynth.vst3" "%LOCALAPPDATA%\Programs\Common\VST3\DefaultSynth.vst3"
+```
+
+복사한 뒤 호스트에서 플러그인 폴더를 다시 스캔해야 목록에 나타납니다.
+
+macOS는 `~/Library/Audio/Plug-Ins/CLAP/`과 `~/Library/Audio/Plug-Ins/VST3/`,
+Linux는 `~/.clap/`과 `~/.vst3/`입니다.
+
+## 호스트 없이 실행하기
+
+DAW를 설치하지 않아도 스탠드얼론으로 바로 연주할 수 있습니다.
+
+```bat
+run.bat
+```
+
+시스템 오디오 출력과 MIDI 입력에 직접 연결되며 플러그인과 같은 에디터가 열립니다.
+
+```bat
+run.bat --midi-input ""          :: 사용 가능한 MIDI 입력 나열
+run.bat --midi-input "MPK mini"  :: 키보드 연결
+run.bat --output-device ""       :: 사용 가능한 출력 장치 나열
+```
+
+**버퍼 크기 주의.** Windows 공유 모드 WASAPI는 장치가 정한 주기를 그대로 넘기는데,
+NIH-plug의 스탠드얼론 백엔드는 요청값과 다르면 오디오 스레드에서 패닉합니다.
+`Received 1056 samples, while the configured buffer size is 512` 같은 메시지가 나오면
+그 숫자를 그대로 넘기세요.
+
+```bat
+set DEFAULTSYNTH_PERIOD=1056
+run.bat
+```
+
+`run.bat`은 개발 머신에서 확인된 1056을 기본값으로 씁니다. 장치마다 다릅니다.
 
 ### 검증
 
