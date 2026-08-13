@@ -1,0 +1,15 @@
+# DefaultSynth 작업 로그
+
+## 2026-08-13 19:55:41 +09:00
+- 작업: 빈 폴더(SYNTH.png 디자인 1장)에서 시작해 CLAP·VST3를 동시에 내보내는 폴리포닉 신스의 뼈대를 세우고 실제 번들 생성과 호스트 검증까지 완료함.
+- 기술 선택: Rust + nih-plug으로 단일 코드베이스에서 CLAP·VST3를 export하고, GUI는 nih_plug_vizia(네이티브)를 사용함. VST3 바인딩이 GPLv3라는 점을 사용자에게 확인받고 진행함. CLAP은 MIT라 제약 없음. 사전에 GUI 툴킷과 DAW 호환성은 무관하다는 점(포맷이 호환성을 결정)을 정정함.
+- 구조: 프레임워크 의존성이 전혀 없는 `crates/ds-dsp`(합성 코어)와 nih-plug 래퍼인 `crates/defaultsynth`로 분리해 DSP를 평범한 cargo test로 검증 가능하게 하고, 향후 VST3 경로를 JUCE로 교체하더라도 코어를 재사용할 수 있게 함. 번들링은 `xtask`.
+- DSP 코어: PolyBLEP 안티에일리어싱 오실레이터(사인/삼각/톱/펄스, 유니즌 스택과 등파워 스테레오 스프레드), AHDSR 엔벨로프, ZDF 상태변수 필터(LP/HP/BP/Notch), White/Pink/Brown 노이즈, 오실레이터 3개+노이즈+필터 2개를 갖는 보이스, 보이스 할당·스틸링·Poly/Mono/Legato·포르타멘토 엔진을 구현하고 단위 테스트 48개를 붙임.
+- 플러그인: 74개 파라미터를 UI 패널 구조에 맞춰 nested 그룹으로 정의하고, MIDI 노트온/오프/초크/CC123을 샘플 정확도로 처리하는 process 루프와 VIZIA 에디터 골격(모든 컨트롤이 실제 파라미터에 바인딩)을 구현함.
+- 빌드 안정화: MiniDAW와 동일한 os error 32(인덱서/백신의 증분 오브젝트 잠금)가 재현되어 `.cargo/config.toml`의 build.target-dir로 빌드 캐시를 C:\tmp\defaultsynth-target으로 분리함.
+- 검증 결과: `cargo xtask bundle`이 DefaultSynth.clap과 규격에 맞는 DefaultSynth.vst3 번들을 생성함(PE 시그니처 MZ 확인). clap-validator 44개 중 31 passed / 9 skipped / 4 failed.
+- 검사기가 잡아낸 실제 결함 2건 수정: (1) Cutoff가 "1.1 kHz Hz"를 출력해 문자열 되읽기 실패 — v2s_f32_hz_then_khz가 이미 단위를 포함하는데 with_unit을 중복 지정한 것이 원인. (2) 파라미터 극단값에서 NaN 샘플 출력 — 마스터 게인 최솟값이 0인데 로그 스무딩을 걸어 로그 영역 보간이 발산. 최솟값을 -60 dB로 올려 해결. 아울러 Pan의 커스텀 value_to_string에 짝이 되는 string_to_value가 없어 파싱 불가였던 것도 함께 고침.
+- 남은 4개 실패 판별: state-reproducibility 3종과 state-invalid-random 크래시는 nih-plug 공식 gain 예제를 같은 검사기로 돌렸을 때 동일한 4개가 동일 크래시 코드로 실패함(대조군 28 passed / 4 failed)을 확인해, 이 프로젝트 결함이 아니라 nih-plug과 clap-validator의 버전 불일치로 판별함. 해시 충돌 가설은 74개 ID의 nih-plug 해시를 직접 계산해 충돌 0으로 배제함.
+- 추가 수정: 파라미터 스무더를 블록당 1회만 진행시켜 램프가 최대 64배 느려지던 문제를 next_step(block_len)으로 교정하고, 노트 이벤트마다 스무더를 추가로 진행시켜 램프 속도가 연주 밀도에 의존하던 문제를 비진행 스냅샷으로 분리함. 플러그인이 호스트 프로세스 안에서 동작하므로 패닉 시 DAW를 함께 죽이는 panic="abort"를 릴리스 프로필에서 제거함.
+- 검증 총계: 워크스페이스 cargo test 52개(DSP 48, 파라미터 4) 통과, 릴리스 번들 생성 성공, clap-validator 31/44 통과(잔여 4건은 상기 프레임워크 이슈).
+- 다음 단계: 커스텀 위젯(원형 노브, 파형 디스플레이, 엔벨로프·LFO 곡선 에디터)으로 디자인 재현, 그다음 웨이브테이블·LFO·모드 매트릭스·이펙트 랙·프리셋 브라우저 순서를 제안함.

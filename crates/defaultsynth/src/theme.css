@@ -1,0 +1,162 @@
+/*
+ * DefaultSynth theme, transcribed from the reference design (SYNTH.png).
+ *
+ * VIZIA's stylesheet dialect is CSS-like but not CSS: there is no cascade of
+ * arbitrary selectors, no custom properties, and lengths need explicit units.
+ * Colours are therefore repeated literally rather than referenced through tokens.
+ */
+
+/* Light brushed-panel shell with the rounded outer frame from the design. */
+.synth-root {
+    background-color: #f2f2f2;
+    border-radius: 14px;
+    child-space: 10px;
+    row-between: 8px;
+}
+
+/* ---- Title bar ------------------------------------------------------- */
+
+.title-bar {
+    height: 54px;
+    col-between: 12px;
+    child-left: 6px;
+    child-right: 6px;
+}
+
+.brand-mark {
+    width: 40px;
+    height: 40px;
+    border-radius: 20px;
+    border-width: 5px;
+    border-color: #16b6e8;
+    background-color: #1a1a1a;
+}
+
+.brand-name {
+    font-size: 24;
+    font-weight: bold;
+    color: #1a1a1a;
+}
+
+.brand-underline {
+    height: 8px;
+    width: 190px;
+    background-color: #16b6e8;
+}
+
+/* ---- Section panels -------------------------------------------------- */
+
+.panel {
+    background-color: #e0e0e0;
+    border-radius: 10px;
+    border-width: 1px;
+    border-color: #d0d0d0;
+    child-space: 9px;
+    row-between: 7px;
+}
+
+.panel-header {
+    height: 26px;
+    col-between: 8px;
+}
+
+.panel-title {
+    font-size: 15;
+    font-weight: bold;
+    color: #2b2b2b;
+}
+
+/* The lit/unlit dot in front of every panel title. */
+.power-dot {
+    width: 17px;
+    height: 17px;
+    border-radius: 9px;
+    background-color: #1a1a1a;
+    transition: background-color 120ms;
+}
+
+.power-dot:checked {
+    background-color: #16b6e8;
+}
+
+/* ---- Controls -------------------------------------------------------- */
+
+.knob-cell {
+    width: 62px;
+    child-space: 1s;
+    row-between: 3px;
+}
+
+.knob-label {
+    font-size: 10;
+    color: #5c5c5c;
+}
+
+.knob-value {
+    font-size: 10;
+    color: #2b2b2b;
+}
+
+.param-slider {
+    height: 22px;
+    border-radius: 4px;
+    background-color: #cfcfcf;
+}
+
+/* Inset dark readouts, like the OCT / FINE / UNISON boxes. */
+.readout {
+    height: 26px;
+    width: 54px;
+    background-color: #6b6b6b;
+    border-radius: 4px;
+    child-space: 1s;
+    color: #ffffff;
+    font-size: 11;
+}
+
+.readout-label {
+    font-size: 9;
+    color: #5c5c5c;
+    child-space: 1s;
+}
+
+/* Dark display wells: waveform views, envelope and LFO editors. */
+.display-well {
+    background-color: #4a4a4a;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: #3a3a3a;
+}
+
+.selector {
+    height: 24px;
+    background-color: #6b6b6b;
+    border-radius: 4px;
+    color: #16b6e8;
+    font-size: 11;
+    child-left: 8px;
+    child-right: 8px;
+}
+
+.tab-bar {
+    height: 30px;
+    col-between: 2px;
+}
+
+.tab {
+    background-color: #6b6b6b;
+    color: #e8e8e8;
+    font-size: 13;
+    child-space: 1s;
+    border-radius: 3px;
+}
+
+.tab:checked {
+    background-color: #16b6e8;
+    color: #0a1a20;
+}
+
+.status-line {
+    font-size: 10;
+    color: #6b6b6b;
+}

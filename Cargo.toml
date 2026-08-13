@@ -1,0 +1,30 @@
+[workspace]
+resolver = "2"
+members = ["crates/ds-dsp", "crates/defaultsynth", "xtask"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+authors = ["DefaultSynth"]
+
+[workspace.dependencies]
+# NIH-plug itself is ISC, but its VST3 bindings are GPLv3. Exporting VST3 therefore
+# makes the whole plugin GPLv3; the CLAP export carries no such condition.
+nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", features = ["assert_process_allocs"] }
+nih_plug_vizia = { git = "https://github.com/robbert-vdh/nih-plug.git" }
+
+# Release builds are what actually run in a host's audio callback, so optimise hard.
+# Note: no `panic = "abort"`. A plugin lives inside the host process, so aborting
+# on a panic takes the user's DAW down with it.
+[profile.release]
+lto = "thin"
+opt-level = 3
+codegen-units = 1
+
+# Debug plugin builds still have to keep up with a realtime callback.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3

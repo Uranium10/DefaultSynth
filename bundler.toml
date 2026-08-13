@@ -1,0 +1,3 @@
+# Maps the cdylib crate onto the product name used for the bundled plugins.
+[defaultsynth]
+name = "DefaultSynth"
