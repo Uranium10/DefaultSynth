@@ -58,3 +58,7 @@
 - 모든 치수를 d(디자인 단위) 함수로 표현해 SVG에서 잰 값을 그대로 코드에 남김. OSC 패널 피치 640, 다이얼 컬럼 간격 184 등.
 - 검증: 워크스페이스 테스트 60개 통과, cargo check 경고 0, CLAP·VST3·스탠드얼론 빌드 성공, 실행 화면 캡처로 하단 스트립까지 잘리지 않고 흰 사각형이 사라진 것을 확인함.
 - 아직 디자인과 다른 부분: 상단 탭바(OSC/EFFECT/MATRIX/GLOBAL)와 프리셋 브라우저, LFO 섹션, DIR 출력과 FM 라우팅, 필터 입력 A/B/C/N 선택, 필터의 DRIVE/FREQ/MIX, 노이즈의 KEYTRACK/PITCH, MONO/LEGATO, NOTE/VELO 커브 에디터. 대부분 대응하는 DSP가 아직 없어 UI만 먼저 그리면 동작하지 않는 컨트롤이 됨.
+
+## 2026-08-13 21:55 +09:00
+- 방향 결정: 비주얼 우선. 디자인의 모든 컨트롤을 먼저 그리고, 대응 DSP가 없는 것은 나중에 이어서 붙임. 따라서 당분간 동작하지 않는 컨트롤이 화면에 존재하는 것을 허용함.
+- 다음 착수 지점: 상단 탭바(OSC/EFFECT/MATRIX/GLOBAL)와 프리셋 브라우저, LFO 섹션, DIR와 FM 라우팅, 필터 입력 A/B/C/N 선택과 DRIVE/FREQ/MIX, 노이즈 KEYTRACK/PITCH, MONO/LEGATO, NOTE/VELO 커브.
