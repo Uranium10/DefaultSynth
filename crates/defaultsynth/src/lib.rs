@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 pub mod editor;
 pub mod params;
+pub mod widgets;
 
 use ds_dsp::{OscSettings, SynthEngine, VoiceSettings, VoicingSettings};
 use nih_plug_vizia::ViziaState;

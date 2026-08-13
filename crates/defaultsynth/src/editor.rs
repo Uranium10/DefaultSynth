@@ -13,6 +13,7 @@ use nih_plug_vizia::{assets, create_vizia_editor, ViziaState, ViziaTheming};
 use std::sync::Arc;
 
 use crate::params::{DefaultSynthParams, OscParams};
+use crate::widgets::{Knob, WaveDisplay};
 
 /// Matches the 4:3-ish proportions of the reference design.
 pub fn default_state() -> Arc<ViziaState> {
@@ -112,59 +113,65 @@ fn osc_panel(
         .class("panel-header")
         .col_between(Pixels(8.0));
 
+        // Waveform well on the left, dials on the right, as in the design.
         HStack::new(cx, |cx| {
-            labelled(cx, "OCT", move |cx| {
-                ParamSlider::new(cx, EditorData::params, move |params| &select(params).octave).class("param-slider");
-            });
-            labelled(cx, "FINE", move |cx| {
-                ParamSlider::new(cx, EditorData::params, move |params| &select(params).fine).class("param-slider");
-            });
-            labelled(cx, "UNISON", move |cx| {
-                ParamSlider::new(cx, EditorData::params, move |params| &select(params).unison).class("param-slider");
-            });
-            labelled(cx, "DETUNE", move |cx| {
-                ParamSlider::new(cx, EditorData::params, move |params| &select(params).detune).class("param-slider");
-            });
-        })
-        .col_between(Pixels(6.0))
-        .height(Pixels(46.0));
+            WaveDisplay::new(
+                cx,
+                EditorData::params.map(move |params| select(params).waveform.value().to_dsp()),
+                EditorData::params.map(move |params| select(params).warp.value()),
+            )
+            .class("display-well")
+            .width(Pixels(196.0));
 
-        HStack::new(cx, |cx| {
-            labelled(cx, "BLEND", move |cx| {
-                ParamSlider::new(cx, EditorData::params, move |params| &select(params).blend).class("param-slider");
-            });
-            labelled(cx, "WARP", move |cx| {
-                ParamSlider::new(cx, EditorData::params, move |params| &select(params).warp).class("param-slider");
-            });
-            labelled(cx, "PAN", move |cx| {
-                ParamSlider::new(cx, EditorData::params, move |params| &select(params).pan).class("param-slider");
-            });
-            labelled(cx, "VOLUME", move |cx| {
-                ParamSlider::new(cx, EditorData::params, move |params| &select(params).level).class("param-slider");
-            });
-        })
-        .col_between(Pixels(6.0))
-        .height(Pixels(46.0));
+            VStack::new(cx, move |cx| {
+                HStack::new(cx, move |cx| {
+                    readout(cx, "OCT", move |params| &select(params).octave);
+                    readout(cx, "FINE", move |params| &select(params).fine);
+                    readout(cx, "UNISON", move |params| &select(params).unison);
+                })
+                .col_between(Pixels(4.0))
+                .height(Auto);
 
-        HStack::new(cx, |cx| {
-            labelled(cx, "PHASE", move |cx| {
-                ParamSlider::new(cx, EditorData::params, move |params| &select(params).phase).class("param-slider");
-            });
-            labelled(cx, "RAND", move |cx| {
-                ParamSlider::new(cx, EditorData::params, move |params| &select(params).phase_random).class("param-slider");
-            });
-            labelled(cx, "FILTER A/B", move |cx| {
-                ParamSlider::new(cx, EditorData::params, move |params| &select(params).filter_send).class("param-slider");
-            });
-            labelled(cx, "TO FILTER", move |cx| {
-                ParamButton::new(cx, EditorData::params, move |params| &select(params).filter_enabled)
-                    .class("param-slider");
-            });
+                HStack::new(cx, move |cx| {
+                    knob_cell(cx, "DETUNE", move |params| &select(params).detune);
+                    knob_cell(cx, "BLEND", move |params| &select(params).blend);
+                    knob_cell(cx, "WARP", move |params| &select(params).warp);
+                    knob_cell(cx, "PHASE", move |params| &select(params).phase);
+                })
+                .col_between(Pixels(2.0))
+                .height(Auto);
+
+                HStack::new(cx, move |cx| {
+                    knob_cell(cx, "RAND", move |params| &select(params).phase_random);
+                    knob_cell(cx, "PAN", move |params| &select(params).pan);
+                    knob_cell(cx, "VOLUME", move |params| &select(params).level);
+                    knob_cell(cx, "FILTER", move |params| &select(params).filter_send);
+                })
+                .col_between(Pixels(2.0))
+                .height(Auto);
+            })
+            .row_between(Pixels(6.0))
+            .width(Stretch(1.0));
         })
-        .col_between(Pixels(6.0))
-        .height(Pixels(46.0));
+        .col_between(Pixels(9.0))
+        .height(Stretch(1.0));
     })
     .class("panel");
+}
+
+/// Compact inset numeric field, like the design's OCT / FINE / UNISON boxes.
+fn readout<P, FMap>(cx: &mut Context, label: &'static str, select: FMap)
+where
+    P: nih_plug::prelude::Param + 'static,
+    FMap: Fn(&Arc<DefaultSynthParams>) -> &P + Copy + 'static,
+{
+    VStack::new(cx, move |cx| {
+        ParamSlider::new(cx, EditorData::params, select).class("readout");
+        Label::new(cx, label).class("readout-label");
+    })
+    .row_between(Pixels(2.0))
+    .width(Stretch(1.0))
+    .height(Auto);
 }
 
 fn filter_panel(cx: &mut Context, title: &str, is_a: bool) {
@@ -205,21 +212,17 @@ fn filter_controls(
     resonance: impl Fn(&Arc<DefaultSynthParams>) -> &FloatParam + Copy + 'static,
     env_amount: impl Fn(&Arc<DefaultSynthParams>) -> &FloatParam + Copy + 'static,
 ) {
-    VStack::new(cx, |cx| {
-        labelled(cx, "MODE", move |cx| {
-            ParamSlider::new(cx, EditorData::params, mode).class("selector");
-        });
-        labelled(cx, "CUT", move |cx| {
-            ParamSlider::new(cx, EditorData::params, cutoff).class("param-slider");
-        });
-        labelled(cx, "RES", move |cx| {
-            ParamSlider::new(cx, EditorData::params, resonance).class("param-slider");
-        });
-        labelled(cx, "ENV", move |cx| {
-            ParamSlider::new(cx, EditorData::params, env_amount).class("param-slider");
-        });
+    VStack::new(cx, move |cx| {
+        ParamSlider::new(cx, EditorData::params, mode).class("selector");
+        HStack::new(cx, move |cx| {
+            knob_cell(cx, "CUT", cutoff);
+            knob_cell(cx, "RES", resonance);
+            knob_cell(cx, "ENV", env_amount);
+        })
+        .col_between(Pixels(2.0))
+        .height(Auto);
     })
-    .row_between(Pixels(5.0));
+    .row_between(Pixels(6.0));
 }
 
 fn noise_panel(cx: &mut Context) {
@@ -231,15 +234,13 @@ fn noise_panel(cx: &mut Context) {
         .class("panel-header")
         .col_between(Pixels(8.0));
 
-        labelled(cx, "COLOUR", |cx| {
-            ParamSlider::new(cx, EditorData::params, |params| &params.noise.colour).class("selector");
-        });
-        labelled(cx, "LEVEL", |cx| {
-            ParamSlider::new(cx, EditorData::params, |params| &params.noise.level).class("param-slider");
-        });
-        labelled(cx, "PAN", |cx| {
-            ParamSlider::new(cx, EditorData::params, |params| &params.noise.pan).class("param-slider");
-        });
+        ParamSlider::new(cx, EditorData::params, |params| &params.noise.colour).class("selector");
+        HStack::new(cx, |cx| {
+            knob_cell(cx, "LEVEL", |params| &params.noise.level);
+            knob_cell(cx, "PAN", |params| &params.noise.pan);
+        })
+        .col_between(Pixels(2.0))
+        .height(Auto);
     })
     .class("panel")
     .width(Stretch(1.0));
@@ -256,24 +257,14 @@ fn amp_env_panel(cx: &mut Context) {
         Element::new(cx).class("display-well").height(Pixels(150.0));
 
         HStack::new(cx, |cx| {
-            labelled(cx, "ATTACK", |cx| {
-                ParamSlider::new(cx, EditorData::params, |params| &params.amp_env.attack).class("param-slider");
-            });
-            labelled(cx, "HOLD", |cx| {
-                ParamSlider::new(cx, EditorData::params, |params| &params.amp_env.hold).class("param-slider");
-            });
-            labelled(cx, "DECAY", |cx| {
-                ParamSlider::new(cx, EditorData::params, |params| &params.amp_env.decay).class("param-slider");
-            });
-            labelled(cx, "SUSTAIN", |cx| {
-                ParamSlider::new(cx, EditorData::params, |params| &params.amp_env.sustain).class("param-slider");
-            });
-            labelled(cx, "RELEASE", |cx| {
-                ParamSlider::new(cx, EditorData::params, |params| &params.amp_env.release).class("param-slider");
-            });
+            knob_cell(cx, "ATTACK", |params| &params.amp_env.attack);
+            knob_cell(cx, "HOLD", |params| &params.amp_env.hold);
+            knob_cell(cx, "DECAY", |params| &params.amp_env.decay);
+            knob_cell(cx, "SUSTAIN", |params| &params.amp_env.sustain);
+            knob_cell(cx, "RELEASE", |params| &params.amp_env.release);
         })
-        .col_between(Pixels(5.0))
-        .height(Pixels(46.0));
+        .col_between(Pixels(2.0))
+        .height(Auto);
     })
     .class("panel");
 }
@@ -289,28 +280,21 @@ fn voicing_panel(cx: &mut Context) {
             labelled(cx, "MODE", |cx| {
                 ParamSlider::new(cx, EditorData::params, |params| &params.voicing.mode).class("selector");
             });
-            labelled(cx, "POLY", |cx| {
-                ParamSlider::new(cx, EditorData::params, |params| &params.voicing.polyphony).class("param-slider");
-            });
-        })
-        .col_between(Pixels(6.0))
-        .height(Pixels(46.0));
-
-        HStack::new(cx, |cx| {
-            labelled(cx, "PORTA", |cx| {
-                ParamSlider::new(cx, EditorData::params, |params| &params.voicing.portamento).class("param-slider");
-            });
+            readout(cx, "POLY", |params| &params.voicing.polyphony);
             labelled(cx, "ALWAYS", |cx| {
                 ParamButton::new(cx, EditorData::params, |params| &params.voicing.always_glide).class("param-slider");
             });
-            labelled(cx, "VELO", |cx| {
-                ParamSlider::new(cx, EditorData::params, |params| &params.voicing.velocity_curve).class("param-slider");
-            });
         })
         .col_between(Pixels(6.0))
-        .height(Pixels(46.0));
+        .height(Auto);
 
-        Label::new(cx, "CLAP · VST3 — 노브/디스플레이 위젯은 다음 단계").class("status-line");
+        HStack::new(cx, |cx| {
+            knob_cell(cx, "PORTA", |params| &params.voicing.portamento);
+            knob_cell(cx, "VELO", |params| &params.voicing.velocity_curve);
+            knob_cell(cx, "MASTER", |params| &params.master_gain);
+        })
+        .col_between(Pixels(2.0))
+        .height(Auto);
     })
     .class("panel");
 }
@@ -323,4 +307,27 @@ fn labelled(cx: &mut Context, label: &str, content: impl Fn(&mut Context) + 'sta
     })
     .row_between(Pixels(3.0))
     .width(Stretch(1.0));
+}
+
+/// Dial with its readout and caption underneath, as drawn throughout the design.
+fn knob_cell<P, FMap>(cx: &mut Context, label: &'static str, select: FMap)
+where
+    P: nih_plug::prelude::Param + 'static,
+    FMap: Fn(&Arc<DefaultSynthParams>) -> &P + Copy + 'static,
+{
+    VStack::new(cx, move |cx| {
+        Knob::new(cx, EditorData::params, select).class("dial");
+        // The readout tracks the parameter's own formatter, so it picks up units
+        // and the custom pan/gain strings for free.
+        Label::new(
+            cx,
+            EditorData::params.map(move |params| {
+                let param = select(params);
+                param.normalized_value_to_string(param.unmodulated_normalized_value(), true)
+            }),
+        )
+        .class("knob-value");
+        Label::new(cx, label).class("knob-label");
+    })
+    .class("knob-cell");
 }

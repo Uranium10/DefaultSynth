@@ -82,19 +82,54 @@
 /* ---- Controls -------------------------------------------------------- */
 
 .knob-cell {
-    width: 62px;
+    width: 1s;
     child-space: 1s;
-    row-between: 3px;
+    row-between: 2px;
+    height: auto;
+}
+
+/*
+ * Custom knob. The widget reads these four style properties off the element:
+ *   background-color -> dial body
+ *   border-color     -> unfilled arc track
+ *   selection-color  -> filled value arc
+ *   color            -> pointer line
+ */
+knob {
+    width: 46px;
+    height: 46px;
+    background-color: #fbfbfb;
+    border-color: #c4c4c4;
+    selection-color: #16b6e8;
+    color: #3a3a3a;
+}
+
+knob:hover {
+    selection-color: #4fd0f5;
+}
+
+knob:active {
+    background-color: #ffffff;
 }
 
 .knob-label {
-    font-size: 10;
+    font-size: 9;
     color: #5c5c5c;
 }
 
 .knob-value {
-    font-size: 10;
+    font-size: 9;
     color: #2b2b2b;
+}
+
+/*
+ * Waveform well. background-color paints the recessed panel and color is the
+ * glowing trace.
+ */
+wave-display {
+    background-color: #4a4a4a;
+    border-radius: 8px;
+    color: #29c8f5;
 }
 
 .param-slider {
