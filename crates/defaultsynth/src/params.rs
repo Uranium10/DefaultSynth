@@ -63,6 +63,36 @@ impl NoiseColourParam {
     }
 }
 
+/// What OSC B / OSC C do to the oscillator in front of them.
+///
+/// Only `None` is wired to the DSP so far; the rest exist so the routing
+/// selector in the editor is the real control it will stay once the modulation
+/// paths land, rather than a placeholder that has to be replaced later.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Enum)]
+pub enum ModSourceParam {
+    #[name = "NONE"]
+    None,
+    #[name = "FM (B)"]
+    FmB,
+    #[name = "FM (C)"]
+    FmC,
+    #[name = "RING"]
+    Ring,
+    #[name = "SYNC"]
+    Sync,
+}
+
+/// Retrigger behaviour for an LFO.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Enum)]
+pub enum LfoTriggerParam {
+    #[name = "TRIG"]
+    Trigger,
+    #[name = "FREE"]
+    Free,
+    #[name = "ENV"]
+    Envelope,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Enum)]
 pub enum VoiceModeParam {
     Poly,
@@ -145,6 +175,12 @@ pub struct OscParams {
     /// 0 routes into filter A, 1 into filter B, in between feeds both.
     #[id = "fltab"]
     pub filter_send: FloatParam,
+    /// DIR: sends this oscillator straight to the output, past both filters.
+    #[id = "dir"]
+    pub direct_out: BoolParam,
+    /// What this oscillator does to its neighbour. Not yet wired to the DSP.
+    #[id = "mod"]
+    pub mod_source: EnumParam<ModSourceParam>,
 }
 
 impl OscParams {
@@ -184,6 +220,8 @@ impl OscParams {
             filter_enabled: BoolParam::new("To Filter", true),
             filter_send: FloatParam::new("Filter A/B", 0.0, FloatRange::Linear { min: 0.0, max: 1.0 })
                 .with_smoother(SmoothingStyle::Linear(20.0)),
+            direct_out: BoolParam::new("Direct Out", false),
+            mod_source: EnumParam::new("Mod Source", ModSourceParam::None),
         }
     }
 }
@@ -257,6 +295,30 @@ pub struct FilterParams {
     /// Unused on filter A, where feeding a filter its own output would be a loop.
     #[id = "inf1"]
     pub input_from_filter_a: BoolParam,
+
+    // Per-source input enables, matching the A / B / C / N dots on each filter.
+    // The oscillators' own A/B send still decides how much reaches each filter;
+    // these gate it per source. Not yet read by the DSP.
+    #[id = "ina"]
+    pub input_a: BoolParam,
+    #[id = "inb"]
+    pub input_b: BoolParam,
+    #[id = "inc"]
+    pub input_c: BoolParam,
+    #[id = "inn"]
+    pub input_noise: BoolParam,
+
+    #[id = "pan"]
+    pub pan: FloatParam,
+    /// Saturation into the filter. Not yet read by the DSP.
+    #[id = "drive"]
+    pub drive: FloatParam,
+    /// Drive tilt frequency. Not yet read by the DSP.
+    #[id = "freq"]
+    pub freq: FloatParam,
+    /// Dry/wet for the whole filter stage. Not yet read by the DSP.
+    #[id = "mix"]
+    pub mix: FloatParam,
 }
 
 impl FilterParams {
@@ -287,6 +349,81 @@ impl FilterParams {
             keytrack: FloatParam::new("Key Track", 0.0, FloatRange::Linear { min: -1.0, max: 1.0 })
                 .with_value_to_string(formatters::v2s_f32_percentage(0))
                 .with_string_to_value(formatters::s2v_f32_percentage()),
+            input_a: BoolParam::new("Input A", enabled),
+            input_b: BoolParam::new("Input B", false),
+            input_c: BoolParam::new("Input C", false),
+            input_noise: BoolParam::new("Input Noise", false),
+            pan: pan_param("Filter Pan"),
+            drive: FloatParam::new("Drive", 0.0, FloatRange::Linear { min: 0.0, max: 24.0 })
+                .with_unit(" dB")
+                .with_smoother(SmoothingStyle::Linear(20.0))
+                .with_step_size(0.1),
+            freq: FloatParam::new(
+                "Drive Freq",
+                1_000.0,
+                FloatRange::Skewed { min: 20.0, max: 20_000.0, factor: FloatRange::skew_factor(-2.0) },
+            )
+            .with_smoother(SmoothingStyle::Logarithmic(20.0))
+            .with_value_to_string(formatters::v2s_f32_hz_then_khz(1))
+            .with_string_to_value(formatters::s2v_f32_hz_then_khz()),
+            mix: FloatParam::new("Mix", 1.0, FloatRange::Linear { min: 0.0, max: 1.0 })
+                .with_smoother(SmoothingStyle::Linear(20.0))
+                .with_value_to_string(formatters::v2s_f32_percentage(0))
+                .with_string_to_value(formatters::s2v_f32_percentage()),
+        }
+    }
+}
+
+/// One LFO panel. None of these reach the DSP yet.
+#[derive(Params)]
+pub struct LfoParams {
+    #[id = "trig"]
+    pub trigger: EnumParam<LfoTriggerParam>,
+    #[id = "rate"]
+    pub rate: FloatParam,
+    #[id = "rise"]
+    pub rise: FloatParam,
+    #[id = "delay"]
+    pub delay: FloatParam,
+    #[id = "bpm"]
+    pub sync_bpm: BoolParam,
+    #[id = "trip"]
+    pub triplet: BoolParam,
+    #[id = "anch"]
+    pub anchor: BoolParam,
+    #[id = "dot"]
+    pub dotted: BoolParam,
+}
+
+impl Default for LfoParams {
+    fn default() -> Self {
+        Self {
+            trigger: EnumParam::new("Trigger", LfoTriggerParam::Trigger),
+            rate: FloatParam::new(
+                "Rate",
+                2.0,
+                FloatRange::Skewed { min: 0.01, max: 40.0, factor: FloatRange::skew_factor(-2.0) },
+            )
+            .with_unit(" Hz")
+            .with_value_to_string(formatters::v2s_f32_rounded(2)),
+            rise: FloatParam::new(
+                "Rise",
+                0.0,
+                FloatRange::Skewed { min: 0.0, max: 10.0, factor: FloatRange::skew_factor(-2.0) },
+            )
+            .with_unit(" s")
+            .with_value_to_string(formatters::v2s_f32_rounded(3)),
+            delay: FloatParam::new(
+                "Delay",
+                0.0,
+                FloatRange::Skewed { min: 0.0, max: 10.0, factor: FloatRange::skew_factor(-2.0) },
+            )
+            .with_unit(" s")
+            .with_value_to_string(formatters::v2s_f32_rounded(3)),
+            sync_bpm: BoolParam::new("Sync to BPM", true),
+            triplet: BoolParam::new("Triplet", false),
+            anchor: BoolParam::new("Anchor", false),
+            dotted: BoolParam::new("Dotted", false),
         }
     }
 }
@@ -301,6 +438,12 @@ pub struct NoiseParams {
     pub level: FloatParam,
     #[id = "pan"]
     pub pan: FloatParam,
+    /// Playback pitch for sampled noise. Not yet read by the DSP.
+    #[id = "pitch"]
+    pub pitch: FloatParam,
+    /// Whether the noise pitch follows the played note. Not yet read by the DSP.
+    #[id = "key"]
+    pub keytrack: BoolParam,
 }
 
 impl Default for NoiseParams {
@@ -313,6 +456,10 @@ impl Default for NoiseParams {
                 .with_value_to_string(formatters::v2s_f32_percentage(0))
                 .with_string_to_value(formatters::s2v_f32_percentage()),
             pan: pan_param("Pan"),
+            pitch: FloatParam::new("Noise Pitch", 0.0, FloatRange::Linear { min: -24.0, max: 24.0 })
+                .with_unit(" st")
+                .with_step_size(0.1),
+            keytrack: BoolParam::new("Key Track", true),
         }
     }
 }
@@ -329,6 +476,9 @@ pub struct VoicingParams {
     pub always_glide: BoolParam,
     #[id = "velo"]
     pub velocity_curve: FloatParam,
+    /// Key-tracking curve for the NOTE box. Not yet read by the DSP.
+    #[id = "note"]
+    pub note_curve: FloatParam,
 }
 
 impl Default for VoicingParams {
@@ -346,6 +496,8 @@ impl Default for VoicingParams {
             always_glide: BoolParam::new("Always Glide", false),
             // 1.0 is linear; above that soft playing thins out faster.
             velocity_curve: FloatParam::new("Velocity Curve", 1.0, FloatRange::Skewed { min: 0.25, max: 4.0, factor: FloatRange::skew_factor(-1.0) })
+                .with_value_to_string(formatters::v2s_f32_rounded(2)),
+            note_curve: FloatParam::new("Note Curve", 1.0, FloatRange::Skewed { min: 0.25, max: 4.0, factor: FloatRange::skew_factor(-1.0) })
                 .with_value_to_string(formatters::v2s_f32_rounded(2)),
         }
     }
@@ -373,6 +525,17 @@ pub struct DefaultSynthParams {
     pub amp_env: EnvParams,
     #[nested(id_prefix = "feg", group = "Filter Envelope")]
     pub filter_env: EnvParams,
+    #[nested(id_prefix = "meg", group = "Mod Envelope")]
+    pub mod_env: EnvParams,
+
+    #[nested(id_prefix = "lfo1", group = "LFO 1")]
+    pub lfo1: LfoParams,
+    #[nested(id_prefix = "lfo2", group = "LFO 2")]
+    pub lfo2: LfoParams,
+    #[nested(id_prefix = "lfo3", group = "LFO 3")]
+    pub lfo3: LfoParams,
+    #[nested(id_prefix = "lfo4", group = "LFO 4")]
+    pub lfo4: LfoParams,
 
     #[nested(id_prefix = "voc", group = "Voicing")]
     pub voicing: VoicingParams,
@@ -393,6 +556,11 @@ impl Default for DefaultSynthParams {
             filter_b: FilterParams::new(false, FilterModeParam::Highpass, 200.0),
             amp_env: EnvParams::new(0.005, 0.4, 0.7, 0.25),
             filter_env: EnvParams::new(0.002, 0.3, 0.0, 0.2),
+            mod_env: EnvParams::new(0.01, 0.5, 0.5, 0.4),
+            lfo1: LfoParams::default(),
+            lfo2: LfoParams::default(),
+            lfo3: LfoParams::default(),
+            lfo4: LfoParams::default(),
             voicing: VoicingParams::default(),
             // The minimum must stay above zero: logarithmic smoothing interpolates
             // in the log domain, so a target of exactly 0.0 yields NaN samples.
