@@ -10,10 +10,16 @@ use nih_plug_vizia::vizia::vg;
 
 /// Points along each drawn curve.
 const POINTS: usize = 160;
+/// Vertical range of the filter response well, in decibels.
+const FLOOR_DB: f32 = -40.0;
+const CEILING_DB: f32 = 18.0;
 
-/// Strokes `sample(t)` for t in 0..1 across the well, where the result is a
-/// normalised level with 0 at the bottom.
-fn stroke_curve(cx: &mut DrawContext, canvas: &mut Canvas, sample: impl Fn(f32) -> f32) {
+/// Strokes `sample(t)` across the well.
+///
+/// Returning `None` breaks the line rather than clamping it, so a filter slope
+/// that has fallen off the bottom of the display simply stops instead of
+/// crawling along the floor.
+fn stroke_curve(cx: &mut DrawContext, canvas: &mut Canvas, sample: impl Fn(f32) -> Option<f32>) {
     let bounds = cx.bounds();
     let opacity = cx.opacity();
 
@@ -34,14 +40,22 @@ fn stroke_curve(cx: &mut DrawContext, canvas: &mut Canvas, sample: impl Fn(f32) 
     }
 
     let mut path = vg::Path::new();
+    let mut drawing = false;
     for index in 0..=POINTS {
         let t = index as f32 / POINTS as f32;
         let x = bounds.x + 2.0 + t * (bounds.w - 4.0);
-        let y = top + height * (1.0 - sample(t).clamp(0.0, 1.0));
-        if index == 0 {
-            path.move_to(x, y);
-        } else {
-            path.line_to(x, y);
+        match sample(t) {
+            Some(level) => {
+                let y = top + height * (1.0 - level.clamp(0.0, 1.0));
+                if drawing {
+                    path.line_to(x, y);
+                } else {
+                    path.move_to(x, y);
+                    drawing = true;
+                }
+            }
+            // Off the bottom of the display: lift the pen and wait for it to come back.
+            None => drawing = false,
         }
     }
 
@@ -79,7 +93,7 @@ impl View for LfoDisplay {
         }
         // A single sine cycle, as drawn in the reference. Editable shapes arrive
         // with the LFO engine.
-        stroke_curve(cx, canvas, |t| 0.5 - 0.5 * (t * std::f32::consts::TAU).cos());
+        stroke_curve(cx, canvas, |t| Some(0.5 - 0.5 * (t * std::f32::consts::TAU).cos()));
     }
 }
 
@@ -126,9 +140,11 @@ where
             let hz = 20.0 * 1000f32.powf(t);
             let ratio = hz / cutoff;
             let magnitude = analogue_magnitude(mode, ratio, q);
-            // Map roughly -40..+18 dB onto the well.
-            let db = 20.0 * magnitude.max(1e-5).log10();
-            (db + 40.0) / 58.0
+            let db = 20.0 * magnitude.max(1e-6).log10();
+            let level = (db - FLOOR_DB) / (CEILING_DB - FLOOR_DB);
+            // Below the floor the slope has left the display, so the line stops
+            // there rather than flattening out along the bottom edge.
+            (level > 0.0).then_some(level)
         });
     }
 }
@@ -168,7 +184,7 @@ impl<E: Lens<Target = f32>> View for CurveBox<E> {
             return;
         }
         let exponent = self.exponent.get(cx).max(0.01);
-        stroke_curve(cx, canvas, move |t| t.powf(exponent));
+        stroke_curve(cx, canvas, move |t| Some(t.powf(exponent)));
     }
 }
 

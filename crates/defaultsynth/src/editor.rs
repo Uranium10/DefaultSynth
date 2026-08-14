@@ -25,7 +25,7 @@ use nih_plug_vizia::{assets, create_vizia_editor, ViziaState, ViziaTheming};
 use std::sync::Arc;
 
 use crate::params::{DefaultSynthParams, EnvParams, FilterParams, LfoParams, OscParams};
-use crate::widgets::{AbSlider, CurveBox, EnvelopeDisplay, FilterResponse, Field, Knob, LfoDisplay, PowerDot, RadioDot, WaveDisplay};
+use crate::widgets::{AbSlider, CurveBox, EnvelopeDisplay, FilterResponse, Field, Knob, LfoDisplay, ParamDropdown, PowerDot, RadioDot, WaveDisplay};
 
 // ---- Scale -------------------------------------------------------------
 
@@ -248,7 +248,7 @@ fn osc_panel(
                 )
                 .class("display-well")
                 .height(Pixels(WAVE_H));
-                Field::new(cx, EditorData::params, move |params| &select(params).waveform)
+                ParamDropdown::new(cx, EditorData::params, move |params| &select(params).waveform)
                     .class("selector")
                     .height(Pixels(FIELD_H));
             })
@@ -273,7 +273,7 @@ fn osc_panel(
                 .height(Pixels(KNOB_CELL));
                 HStack::new(cx, move |cx| {
                     knob_cell(cx, "WARP", move |params| &select(params).warp);
-                    knob_cell(cx, "FILTER", move |params| &select(params).filter_send);
+                    knob_cell(cx, "FILTER", move |params| &select(params).mod_amount);
                 })
                 .height(Pixels(KNOB_CELL));
             })
@@ -286,7 +286,7 @@ fn osc_panel(
                     knob_cell(cx, "RAND", move |params| &select(params).phase_random);
                 })
                 .height(Pixels(KNOB_CELL));
-                Field::new(cx, EditorData::params, move |params| &select(params).mod_source)
+                ParamDropdown::new(cx, EditorData::params, move |params| &select(params).mod_source)
                     .class("selector")
                     .height(Pixels(FIELD_H));
             })
@@ -390,7 +390,7 @@ fn lfo_panel(cx: &mut Context) {
 fn lfo_controls(cx: &mut Context, select: fn(&DefaultSynthParams) -> &LfoParams) {
     HStack::new(cx, move |cx| {
         VStack::new(cx, move |cx| {
-            Field::new(cx, EditorData::params, move |params| &select(params).trigger)
+            ParamDropdown::new(cx, EditorData::params, move |params| &select(params).trigger)
                 .class("selector")
                 .height(Pixels(FIELD_H));
         })
@@ -415,7 +415,20 @@ fn lfo_controls(cx: &mut Context, select: fn(&DefaultSynthParams) -> &LfoParams)
         Element::new(cx).width(Stretch(1.0));
 
         HStack::new(cx, move |cx| {
-            knob_cell(cx, "RATE", move |params| &select(params).rate);
+            // With BPM sync on, RATE steps through musical divisions instead of
+            // sweeping Hz. They are separate parameters, so the knob has to swap
+            // which one it drives rather than reinterpret a single value.
+            Binding::new(
+                cx,
+                EditorData::params.map(move |params| select(params).sync_bpm.value()),
+                move |cx, synced| {
+                    if synced.get(cx) {
+                        knob_cell(cx, "RATE", move |params| &select(params).sync_rate);
+                    } else {
+                        knob_cell(cx, "RATE", move |params| &select(params).rate);
+                    }
+                },
+            );
             knob_cell(cx, "RISE", move |params| &select(params).rise);
             knob_cell(cx, "DELAY", move |params| &select(params).delay);
         })
@@ -437,7 +450,7 @@ fn noise_panel(cx: &mut Context) {
         .height(Pixels(HEADER_H))
         .col_between(Pixels(d(20.0)));
 
-        Field::new(cx, EditorData::params, |params| &params.noise.colour)
+        ParamDropdown::new(cx, EditorData::params, |params| &params.noise.colour)
             .class("selector")
             .height(Pixels(FIELD_H));
 
@@ -491,7 +504,7 @@ fn filter_panel(cx: &mut Context, title: &'static str, is_a: bool) {
                 )
                 .class("display-well")
                 .height(Stretch(1.0));
-                Field::new(cx, EditorData::params, move |params| &select(params).mode)
+                ParamDropdown::new(cx, EditorData::params, move |params| &select(params).mode)
                     .class("selector")
                     .height(Pixels(FIELD_H));
             })

@@ -62,6 +62,62 @@ fn string_conversions_round_trip() {
 }
 
 #[test]
+fn sync_rates_land_on_the_expected_musical_lengths() {
+    use crate::params::SyncRateParam;
+
+    // At 120 bpm a whole note is two seconds, so a bar is two seconds too.
+    let bpm = 120.0;
+    assert!((SyncRateParam::OneBar.cycle_seconds(bpm, false, false) - 2.0).abs() < 1e-5);
+    assert!((SyncRateParam::FourBar.cycle_seconds(bpm, false, false) - 8.0).abs() < 1e-5);
+    assert!((SyncRateParam::OneOver4.cycle_seconds(bpm, false, false) - 0.5).abs() < 1e-5);
+    assert!((SyncRateParam::OneOver128.cycle_seconds(bpm, false, false) - 2.0 / 128.0).abs() < 1e-6);
+}
+
+#[test]
+fn triplets_shorten_and_dots_lengthen_the_cycle() {
+    use crate::params::SyncRateParam;
+
+    let plain = SyncRateParam::OneOver4.cycle_seconds(120.0, false, false);
+    let triplet = SyncRateParam::OneOver4.cycle_seconds(120.0, true, false);
+    let dotted = SyncRateParam::OneOver4.cycle_seconds(120.0, false, true);
+    // Three triplets fill two plain notes; a dotted note is half again as long.
+    assert!((triplet - plain * 2.0 / 3.0).abs() < 1e-6, "triplet was {triplet}");
+    assert!((dotted - plain * 1.5).abs() < 1e-6, "dotted was {dotted}");
+    // Both set at once is not a meaningful combination, so triplet wins.
+    assert!((SyncRateParam::OneOver4.cycle_seconds(120.0, true, true) - triplet).abs() < 1e-6);
+}
+
+#[test]
+fn sync_rates_are_ordered_from_fastest_to_slowest() {
+    use crate::params::SyncRateParam;
+
+    // The knob steps through these in order, so the list has to be monotonic or
+    // turning it right would sometimes speed the LFO up and sometimes slow it.
+    let rates = [
+        SyncRateParam::OneOver128, SyncRateParam::OneOver64, SyncRateParam::OneOver32,
+        SyncRateParam::OneOver16, SyncRateParam::OneOver8, SyncRateParam::OneOver4,
+        SyncRateParam::OneOver2, SyncRateParam::OneBar, SyncRateParam::TwoBar, SyncRateParam::FourBar,
+    ];
+    for pair in rates.windows(2) {
+        assert!(
+            pair[0].cycle_in_whole_notes() < pair[1].cycle_in_whole_notes(),
+            "{:?} should be shorter than {:?}",
+            pair[0],
+            pair[1]
+        );
+    }
+}
+
+#[test]
+fn filter_routing_defaults_to_an_even_split() {
+    let params = DefaultSynthParams::default();
+    // Centre is 50:50 between the two filters, which is what the design's A-B
+    // slider shows at rest.
+    assert!((params.osc_a.filter_send.value() - 0.5).abs() < 1e-6);
+    assert_eq!(params.osc_a.filter_send.to_string(), "50:50");
+}
+
+#[test]
 fn no_parameter_produces_a_non_finite_plain_value() {
     let params = DefaultSynthParams::default();
     for (id, ptr, _) in params.param_map() {

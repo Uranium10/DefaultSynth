@@ -6,6 +6,7 @@
 
 mod ab_slider;
 mod curve_display;
+mod dropdown;
 mod envelope_display;
 mod field;
 mod knob;
@@ -15,6 +16,7 @@ mod wave_display;
 
 pub use ab_slider::AbSlider;
 pub use curve_display::{CurveBox, FilterResponse, LfoDisplay};
+pub use dropdown::ParamDropdown;
 pub use envelope_display::EnvelopeDisplay;
 pub use field::Field;
 pub use knob::Knob;

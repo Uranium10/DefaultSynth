@@ -93,6 +93,69 @@ pub enum LfoTriggerParam {
     Envelope,
 }
 
+/// Tempo-locked LFO rate, used instead of the free-running Hz rate while BPM
+/// sync is on. The TRIP and DOT toggles scale whichever division is picked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Enum)]
+pub enum SyncRateParam {
+    #[name = "1/128"]
+    OneOver128,
+    #[name = "1/64"]
+    OneOver64,
+    #[name = "1/32"]
+    OneOver32,
+    #[name = "1/16"]
+    OneOver16,
+    #[name = "1/8"]
+    OneOver8,
+    #[name = "1/4"]
+    OneOver4,
+    #[name = "1/2"]
+    OneOver2,
+    #[name = "1 Bar"]
+    OneBar,
+    #[name = "2 Bar"]
+    TwoBar,
+    #[name = "4 Bar"]
+    FourBar,
+}
+
+impl SyncRateParam {
+    /// Length of one LFO cycle in whole notes, before TRIP or DOT is applied.
+    ///
+    /// A bar is one whole note in 4/4, which is what the design's "1 Bar" means.
+    pub fn cycle_in_whole_notes(self) -> f32 {
+        match self {
+            Self::OneOver128 => 1.0 / 128.0,
+            Self::OneOver64 => 1.0 / 64.0,
+            Self::OneOver32 => 1.0 / 32.0,
+            Self::OneOver16 => 1.0 / 16.0,
+            Self::OneOver8 => 1.0 / 8.0,
+            Self::OneOver4 => 1.0 / 4.0,
+            Self::OneOver2 => 1.0 / 2.0,
+            Self::OneBar => 1.0,
+            Self::TwoBar => 2.0,
+            Self::FourBar => 4.0,
+        }
+    }
+
+    /// Cycle length in seconds at `bpm`, with the triplet and dotted modifiers.
+    ///
+    /// Triplets fit three in the space of two, dotted notes take half again as
+    /// long; the two are mutually exclusive in every host that offers them, and
+    /// triplet wins here if both are somehow set.
+    pub fn cycle_seconds(self, bpm: f32, triplet: bool, dotted: bool) -> f32 {
+        let seconds_per_whole_note = 240.0 / bpm.max(1.0);
+        let modifier = if triplet {
+            2.0 / 3.0
+        } else if dotted {
+            1.5
+        } else {
+            1.0
+        };
+        self.cycle_in_whole_notes() * seconds_per_whole_note * modifier
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Enum)]
 pub enum VoiceModeParam {
     Poly,
@@ -181,6 +244,9 @@ pub struct OscParams {
     /// What this oscillator does to its neighbour. Not yet wired to the DSP.
     #[id = "mod"]
     pub mod_source: EnumParam<ModSourceParam>,
+    /// How much of `mod_source` is applied. Not yet wired to the DSP.
+    #[id = "modamt"]
+    pub mod_amount: FloatParam,
 }
 
 impl OscParams {
@@ -218,10 +284,28 @@ impl OscParams {
                 .with_string_to_value(formatters::s2v_f32_percentage()),
             pan: pan_param("Pan"),
             filter_enabled: BoolParam::new("To Filter", true),
-            filter_send: FloatParam::new("Filter A/B", 0.0, FloatRange::Linear { min: 0.0, max: 1.0 })
-                .with_smoother(SmoothingStyle::Linear(20.0)),
+            // Routing ratio between the two filters. Centre is an even 50:50
+            // split, which is why it defaults to the middle rather than to A.
+            filter_send: FloatParam::new("Filter A/B", 0.5, FloatRange::Linear { min: 0.0, max: 1.0 })
+                .with_smoother(SmoothingStyle::Linear(20.0))
+                .with_value_to_string(Arc::new(|value| {
+                    let to_b = (value * 100.0).round();
+                    format!("{:.0}:{to_b:.0}", 100.0 - to_b)
+                }))
+                .with_string_to_value(Arc::new(|string| {
+                    // Accepts "40:60" as well as a plain percentage toward B.
+                    let text = string.trim();
+                    if let Some((_, b)) = text.split_once(':') {
+                        return b.trim().parse::<f32>().ok().map(|value| (value / 100.0).clamp(0.0, 1.0));
+                    }
+                    text.trim_end_matches('%').trim().parse::<f32>().ok().map(|value| (value / 100.0).clamp(0.0, 1.0))
+                })),
             direct_out: BoolParam::new("Direct Out", false),
             mod_source: EnumParam::new("Mod Source", ModSourceParam::None),
+            mod_amount: FloatParam::new("Mod Amount", 0.0, FloatRange::Linear { min: 0.0, max: 1.0 })
+                .with_smoother(SmoothingStyle::Linear(20.0))
+                .with_value_to_string(formatters::v2s_f32_percentage(0))
+                .with_string_to_value(formatters::s2v_f32_percentage()),
         }
     }
 }
@@ -379,8 +463,15 @@ impl FilterParams {
 pub struct LfoParams {
     #[id = "trig"]
     pub trigger: EnumParam<LfoTriggerParam>,
+    /// Free-running rate, used while BPM sync is off.
     #[id = "rate"]
     pub rate: FloatParam,
+    /// Tempo-locked rate, used while BPM sync is on. Two parameters rather than
+    /// one because the free rate is a continuous sweep and the synced one is a
+    /// short list of musical divisions; a host automating either should see the
+    /// range it actually expects.
+    #[id = "srate"]
+    pub sync_rate: EnumParam<SyncRateParam>,
     #[id = "rise"]
     pub rise: FloatParam,
     #[id = "delay"]
@@ -406,6 +497,7 @@ impl Default for LfoParams {
             )
             .with_unit(" Hz")
             .with_value_to_string(formatters::v2s_f32_rounded(2)),
+            sync_rate: EnumParam::new("Sync Rate", SyncRateParam::OneOver4),
             rise: FloatParam::new(
                 "Rise",
                 0.0,
