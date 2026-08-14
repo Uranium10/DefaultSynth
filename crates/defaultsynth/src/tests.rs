@@ -127,3 +127,43 @@ fn no_parameter_produces_a_non_finite_plain_value() {
         }
     }
 }
+
+#[test]
+fn matrix_enum_indices_match_the_dsp_ones() {
+    use crate::params::{LfoShapeParam, LfoTriggerParam, ModDestSlotParam, ModSourceSlotParam};
+
+    // The plugin enums and the DSP ones are paired by position, not by name, so
+    // inserting a variant in one and not the other would silently reroute every
+    // slot below it. This is the test that catches that.
+    for index in 0..ModSourceSlotParam::variants().len() {
+        assert_eq!(
+            ModSourceSlotParam::from_index(index).to_dsp(),
+            ds_dsp::ModSource::from_index(index),
+            "source index {index} disagrees"
+        );
+    }
+    for index in 0..ModDestSlotParam::variants().len() {
+        assert_eq!(
+            ModDestSlotParam::from_index(index).to_dsp(),
+            ds_dsp::ModDest::from_index(index),
+            "destination index {index} disagrees"
+        );
+    }
+    // Every variant must be reachable: a matrix row that cannot select a
+    // destination is a row the player cannot use.
+    assert_eq!(ModSourceSlotParam::variants().len(), 11);
+    assert_eq!(ModDestSlotParam::variants().len(), 14);
+    assert_eq!(LfoShapeParam::variants().len(), 6);
+    assert_eq!(LfoTriggerParam::variants().len(), 3);
+}
+
+#[test]
+fn every_matrix_slot_starts_disconnected() {
+    let params = DefaultSynthParams::default();
+    // A synth that modulates something the moment it loads would be a surprise,
+    // and the amounts are what the MATRIX page will edit later.
+    for (index, slot) in params.matrix.iter().enumerate() {
+        assert_eq!(slot.to_dsp().source, ds_dsp::ModSource::None, "slot {index} starts routed");
+        assert_eq!(slot.to_dsp().destination, ds_dsp::ModDest::None, "slot {index} starts routed");
+    }
+}

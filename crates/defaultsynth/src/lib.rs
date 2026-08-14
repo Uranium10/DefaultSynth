@@ -27,6 +27,10 @@ pub struct DefaultSynth {
     editor_state: Arc<ViziaState>,
     engine: SynthEngine,
     sample_rate: f32,
+    /// Host tempo, used to resolve tempo-locked LFO rates.
+    tempo: f32,
+    /// Latest CC1 value, exposed to the matrix as a modulation source.
+    mod_wheel: f32,
 }
 
 impl Default for DefaultSynth {
@@ -36,11 +40,37 @@ impl Default for DefaultSynth {
             editor_state: editor::default_state(),
             engine: SynthEngine::new(44_100.0),
             sample_rate: 44_100.0,
+            tempo: 120.0,
+            mod_wheel: 0.0,
         }
     }
 }
 
 impl DefaultSynth {
+    /// Resolves one LFO's parameters, turning a tempo-locked division into Hz.
+    ///
+    /// The DSP core only speaks in cycles per second, which keeps the transport
+    /// out of it; this is the one place that has to know the host's tempo.
+    fn lfo_settings(&self, params: &params::LfoParams) -> ds_dsp::LfoSettings {
+        let frequency = if params.sync_bpm.value() {
+            ds_dsp::lfo::sync_frequency(
+                params.sync_rate.value().cycle_in_whole_notes(),
+                self.tempo,
+                params.triplet.value(),
+                params.dotted.value(),
+            )
+        } else {
+            params.rate.value()
+        };
+        ds_dsp::LfoSettings {
+            shape: params.shape.value().to_dsp(),
+            trigger: params.trigger.value().to_dsp(),
+            frequency,
+            delay: params.delay.value(),
+            rise: params.rise.value(),
+        }
+    }
+
     /// Snapshots the parameter tree into the plain settings the DSP core takes.
     ///
     /// `steps` is how many samples the block covers. Smoothers are advanced by
@@ -60,6 +90,7 @@ impl DefaultSynth {
             noise_pan: params.noise.pan.smoothed.next_step(steps),
             amp_env: params.amp_env.to_dsp(),
             filter_env: params.filter_env.to_dsp(),
+            mod_env: params.mod_env.to_dsp(),
             filter_a_enabled: params.filter_a.enabled.value(),
             filter_a_mode: params.filter_a.mode.value().to_dsp(),
             filter_a_cutoff: params.filter_a.cutoff.smoothed.next_step(steps),
@@ -72,6 +103,14 @@ impl DefaultSynth {
             filter_b_resonance: params.filter_b.resonance.smoothed.next_step(steps),
             filter_b_input_from_a: params.filter_b.input_from_filter_a.value(),
             velocity_curve: params.voicing.velocity_curve.value(),
+            lfo: [
+                self.lfo_settings(&params.lfo1),
+                self.lfo_settings(&params.lfo2),
+                self.lfo_settings(&params.lfo3),
+                self.lfo_settings(&params.lfo4),
+            ],
+            matrix: std::array::from_fn(|index| params.matrix[index].to_dsp()),
+            mod_wheel: self.mod_wheel,
         }
     }
 
@@ -167,6 +206,12 @@ impl Plugin for DefaultSynth {
         _aux: &mut AuxiliaryBuffers,
         context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
+        // Tempo-locked LFOs need the host's tempo; hosts that report none leave
+        // the last known value in place rather than snapping to a default.
+        if let Some(tempo) = context.transport().tempo {
+            self.tempo = tempo as f32;
+        }
+
         let total_samples = buffer.samples();
         let mut block_start = 0;
         let mut next_event = context.next_event();
@@ -223,12 +268,13 @@ impl DefaultSynth {
             }
             // A choke means the host wants the voice gone now, with no tail.
             NoteEvent::Choke { .. } => self.engine.reset(),
-            NoteEvent::MidiCC { cc, value, .. } => {
+            NoteEvent::MidiCC { cc, value, .. } => match cc {
+                // CC 1 is the modulation wheel, offered to the matrix as a source.
+                1 => self.mod_wheel = value.clamp(0.0, 1.0),
                 // CC 123 is All Notes Off; hosts send it on panic.
-                if cc == 123 && value > 0.0 {
-                    self.engine.all_notes_off();
-                }
-            }
+                123 if value > 0.0 => self.engine.all_notes_off(),
+                _ => {}
+            },
             _ => {}
         }
     }

@@ -1,6 +1,8 @@
 //! A single polyphonic voice: three oscillators, noise, two filters and an amp envelope.
 
 use crate::envelope::{Envelope, EnvelopeSettings};
+use crate::lfo::{Lfo, LfoSettings, LfoTrigger};
+use crate::modulation::{self, ModInputs, ModSlot, MOD_SLOTS};
 use crate::filter::{FilterMode, StateVariableFilter};
 use crate::noise::{Noise, NoiseColour};
 use crate::oscillator::{midi_note_to_hz, Oscillator, Waveform};
@@ -57,6 +59,8 @@ pub struct VoiceSettings {
     pub noise_pan: f32,
     pub amp_env: EnvelopeSettings,
     pub filter_env: EnvelopeSettings,
+    /// ENV 3: reaches nothing on its own, only whatever the matrix routes it to.
+    pub mod_env: EnvelopeSettings,
     pub filter_a_enabled: bool,
     pub filter_a_mode: FilterMode,
     pub filter_a_cutoff: f32,
@@ -72,6 +76,12 @@ pub struct VoiceSettings {
     pub filter_b_input_from_a: bool,
     /// Velocity-to-amplitude curve exponent, from the VOICING panel's VELO curve.
     pub velocity_curve: f32,
+    /// Per-LFO settings, shared by every voice.
+    pub lfo: [LfoSettings; 4],
+    /// Modulation routing, shared by every voice.
+    pub matrix: [ModSlot; MOD_SLOTS],
+    /// Host modulation wheel, 0..1.
+    pub mod_wheel: f32,
 }
 
 impl Default for VoiceSettings {
@@ -84,6 +94,7 @@ impl Default for VoiceSettings {
             noise_pan: 0.0,
             amp_env: EnvelopeSettings::default(),
             filter_env: EnvelopeSettings::default(),
+            mod_env: EnvelopeSettings::default(),
             filter_a_enabled: true,
             filter_a_mode: FilterMode::Lowpass,
             filter_a_cutoff: 12_000.0,
@@ -96,6 +107,9 @@ impl Default for VoiceSettings {
             filter_b_resonance: 0.1,
             filter_b_input_from_a: false,
             velocity_curve: 1.0,
+            lfo: [LfoSettings::default(); 4],
+            matrix: [ModSlot::default(); MOD_SLOTS],
+            mod_wheel: 0.0,
         }
     }
 }
@@ -106,8 +120,11 @@ pub struct Voice {
     noise: Noise,
     amp_env: Envelope,
     filter_env: Envelope,
+    mod_env: Envelope,
     filter_a: StateVariableFilter,
     filter_b: StateVariableFilter,
+    /// Per-voice LFOs. Free-running ones read the engine.s shared phase instead.
+    lfos: [Lfo; 4],
     note: u8,
     /// The host's voice id for CLAP note expressions; -1 when unused.
     voice_id: i32,
@@ -129,8 +146,10 @@ impl Voice {
             noise: Noise::new(seed),
             amp_env: Envelope::default(),
             filter_env: Envelope::default(),
+            mod_env: Envelope::default(),
             filter_a: StateVariableFilter::new(sample_rate),
             filter_b: StateVariableFilter::new(sample_rate),
+            lfos: [Lfo::new(seed ^ 0x51), Lfo::new(seed ^ 0x52), Lfo::new(seed ^ 0x53), Lfo::new(seed ^ 0x54)],
             note: 0,
             voice_id: -1,
             channel: 0,
@@ -149,8 +168,12 @@ impl Voice {
         for osc in &mut self.oscillators {
             osc.set_sample_rate(sample_rate);
         }
+        for lfo in &mut self.lfos {
+            lfo.set_sample_rate(sample_rate);
+        }
         self.amp_env.set_sample_rate(sample_rate);
         self.filter_env.set_sample_rate(sample_rate);
+        self.mod_env.set_sample_rate(sample_rate);
         self.filter_a.set_sample_rate(sample_rate);
         self.filter_b.set_sample_rate(sample_rate);
     }
@@ -221,8 +244,15 @@ impl Voice {
         self.noise.reset();
         self.filter_a.reset();
         self.filter_b.reset();
+        for (index, lfo) in self.lfos.iter_mut().enumerate() {
+            // Free-running LFOs keep their phase across notes; the others restart.
+            if settings.lfo[index].trigger != LfoTrigger::Free {
+                lfo.trigger();
+            }
+        }
         self.amp_env.trigger();
         self.filter_env.trigger();
+        self.mod_env.trigger();
     }
 
     /// Retargets an already-sounding voice, used for mono/legato playing.
@@ -238,18 +268,21 @@ impl Voice {
         if retrigger {
             self.amp_env.retrigger_legato();
             self.filter_env.retrigger_legato();
+            self.mod_env.retrigger_legato();
         }
     }
 
     pub fn release(&mut self) {
         self.amp_env.release();
         self.filter_env.release();
+        self.mod_env.release();
     }
 
     /// Immediately silences and frees the voice.
     pub fn kill(&mut self) {
         self.amp_env.reset();
         self.filter_env.reset();
+        self.mod_env.reset();
         self.active = false;
         self.voice_id = -1;
     }
@@ -277,11 +310,30 @@ impl Voice {
 
         let amp = self.amp_env.process(&settings.amp_env);
         let filter_env = self.filter_env.process(&settings.filter_env);
+        let mod_env = self.mod_env.process(&settings.mod_env);
         if self.amp_env.is_finished() {
             self.active = false;
             self.voice_id = -1;
             return (0.0, 0.0);
         }
+
+        // Run every LFO and collect the modulation for this sample. LFOs advance
+        // even when nothing is routed from them, so switching a matrix row on
+        // mid-note picks up a phase that is already in step with the others.
+        let mut inputs = ModInputs {
+            amp_env: amp,
+            filter_env,
+            mod_env,
+            velocity: self.velocity,
+            // Four octaves either side of middle C spans the usable keyboard.
+            key_track: ((self.current_note - 60.0) / 48.0).clamp(-1.0, 1.0),
+            mod_wheel: settings.mod_wheel,
+            ..ModInputs::default()
+        };
+        for (index, lfo) in self.lfos.iter_mut().enumerate() {
+            inputs.lfo[index] = lfo.process(&settings.lfo[index]);
+        }
+        let modulation = modulation::apply(&settings.matrix, &inputs);
 
         // Sum the oscillators into the two filter buses.
         let mut bus_a = (0.0f32, 0.0f32);
@@ -293,12 +345,15 @@ impl Voice {
             if !config.enabled || config.level <= 0.0 {
                 continue;
             }
-            let note = self.current_note + config.octave as f32 * 12.0;
+            let note = self.current_note + config.octave as f32 * 12.0 + modulation.pitch_semitones;
             let frequency = midi_note_to_hz(note) * crate::oscillator::cents_to_ratio(config.fine_cents);
-            let (mut left, mut right) = osc.process(frequency, config.detune_cents);
-            let (pan_left, pan_right) = equal_power_pan(config.pan);
-            left *= config.level * pan_left;
-            right *= config.level * pan_right;
+            osc.set_warp(config.warp + modulation.osc_warp[index]);
+            let detune = (config.detune_cents + modulation.detune_cents).max(0.0);
+            let (mut left, mut right) = osc.process(frequency, detune);
+            let level = (config.level + modulation.osc_level[index]).clamp(0.0, 2.0);
+            let (pan_left, pan_right) = equal_power_pan(config.pan + modulation.pan);
+            left *= level * pan_left;
+            right *= level * pan_right;
 
             if config.filter_enabled {
                 // filter_send crossfades this oscillator between the two filters.
@@ -325,10 +380,11 @@ impl Voice {
             // Envelope and key tracking both offset the cutoff in octaves, which is
             // how the ear hears filter movement.
             let keytrack = (self.current_note - 60.0) / 12.0 * settings.filter_a_keytrack;
-            let modulation = filter_env * settings.filter_a_env_amount + keytrack;
-            let cutoff = settings.filter_a_cutoff * modulation.exp2();
+            let octaves = filter_env * settings.filter_a_env_amount + keytrack + modulation.filter_a_octaves;
+            let cutoff = settings.filter_a_cutoff * octaves.exp2();
+            let resonance = (settings.filter_a_resonance + modulation.filter_a_resonance).clamp(0.0, 1.0);
             self.filter_a.set_mode(settings.filter_a_mode);
-            self.filter_a.set_params(cutoff, settings.filter_a_resonance);
+            self.filter_a.set_params(cutoff, resonance);
             bus_a.0 = self.filter_a.process(bus_a.0, 0);
             bus_a.1 = self.filter_a.process(bus_a.1, 1);
         }
@@ -343,14 +399,17 @@ impl Voice {
 
         if settings.filter_b_enabled {
             self.filter_b.set_mode(settings.filter_b_mode);
-            self.filter_b.set_params(settings.filter_b_cutoff, settings.filter_b_resonance);
+            let cutoff_b = settings.filter_b_cutoff * modulation.filter_b_octaves.exp2();
+            self.filter_b.set_params(cutoff_b, settings.filter_b_resonance);
             bus_b.0 = self.filter_b.process(bus_b.0, 0);
             bus_b.1 = self.filter_b.process(bus_b.1, 1);
         }
 
         // Velocity curve: >1 makes soft playing quieter, <1 compresses the range.
         let velocity_gain = self.velocity.powf(settings.velocity_curve.max(0.01));
-        let gain = amp * velocity_gain;
+        // Amplitude modulation rides on top of the envelope rather than replacing
+        // it, and cannot push the voice negative.
+        let gain = amp * velocity_gain * (1.0 + modulation.amplitude).max(0.0);
         (
             (bus_a.0 + bus_b.0 + dry.0) * gain,
             (bus_a.1 + bus_b.1 + dry.1) * gain,
@@ -541,6 +600,102 @@ mod tests {
         let direct = voice_rms(&config, 24_000);
 
         assert!((chained - direct).abs() < direct * 0.05, "routing changed the level: {chained} vs {direct}");
+    }
+
+    /// Renders a voice and reports how far its output wanders, which is what a
+    /// modulated parameter changes even when the average level does not.
+    fn render(config: &VoiceSettings, samples: usize) -> Vec<f32> {
+        let mut voice = Voice::new(SAMPLE_RATE, 31);
+        let mut rng = Rng::new(31);
+        voice.start(60, 1.0, 0, 0, config, None, 0.0, SAMPLE_RATE, 0, &mut rng);
+        (0..samples).map(|_| voice.process(config).0).collect()
+    }
+
+    #[test]
+    fn an_lfo_on_pitch_actually_bends_the_note() {
+        use crate::lfo::{LfoSettings, LfoShape};
+        use crate::modulation::{ModDest, ModSlot, ModSource};
+
+        let mut config = settings();
+        config.amp_env = EnvelopeSettings { attack: 0.0, hold: 10.0, decay: 0.0, sustain: 1.0, release: 0.01 };
+        config.filter_a_enabled = false;
+        let plain = render(&config, 24_000);
+
+        // A slow square on pitch holds the note a whole tone sharp for half a
+        // cycle, so the two renders diverge well beyond rounding.
+        config.lfo[0] = LfoSettings { shape: LfoShape::Square, frequency: 1.0, ..LfoSettings::default() };
+        config.matrix[0] = ModSlot { source: ModSource::Lfo1, destination: ModDest::Pitch, amount: 0.5 };
+        let bent = render(&config, 24_000);
+
+        let difference: f32 = plain.iter().zip(&bent).map(|(a, b)| (a - b).abs()).sum();
+        assert!(difference > 100.0, "pitch modulation changed nothing: {difference}");
+        assert!(bent.iter().all(|value| value.is_finite()));
+    }
+
+    #[test]
+    fn an_lfo_on_amplitude_makes_the_level_move() {
+        use crate::lfo::{LfoSettings, LfoShape};
+        use crate::modulation::{ModDest, ModSlot, ModSource};
+
+        let mut config = settings();
+        config.amp_env = EnvelopeSettings { attack: 0.0, hold: 10.0, decay: 0.0, sustain: 1.0, release: 0.01 };
+        config.filter_a_enabled = false;
+        config.lfo[0] = LfoSettings { shape: LfoShape::Sine, frequency: 2.0, ..LfoSettings::default() };
+        config.matrix[0] = ModSlot { source: ModSource::Lfo1, destination: ModDest::Amplitude, amount: 0.9 };
+
+        // Compare the loudest part of the tremolo cycle against the quietest.
+        let rendered = render(&config, 24_000);
+        let window = 2_000;
+        let peaks: Vec<f32> = rendered
+            .chunks(window)
+            .map(|chunk| chunk.iter().fold(0.0_f32, |peak, value| peak.max(value.abs())))
+            .collect();
+        let loudest = peaks.iter().cloned().fold(0.0_f32, f32::max);
+        let quietest = peaks.iter().cloned().fold(f32::MAX, f32::min);
+        assert!(loudest > quietest * 1.5, "tremolo was flat: {quietest} to {loudest}");
+    }
+
+    #[test]
+    fn an_unrouted_lfo_leaves_the_sound_alone() {
+        use crate::lfo::{LfoSettings, LfoShape};
+
+        let mut config = settings();
+        config.amp_env = EnvelopeSettings { attack: 0.0, hold: 10.0, decay: 0.0, sustain: 1.0, release: 0.01 };
+        let plain = render(&config, 8_000);
+        // The LFO runs, but no matrix row reads it.
+        config.lfo[0] = LfoSettings { shape: LfoShape::Square, frequency: 3.0, ..LfoSettings::default() };
+        let with_lfo = render(&config, 8_000);
+        assert_eq!(plain, with_lfo, "an unrouted LFO leaked into the output");
+    }
+
+    #[test]
+    fn the_mod_envelope_runs_on_its_own_settings() {
+        use crate::modulation::{ModDest, ModSource};
+
+        let mut config = settings();
+        config.amp_env = EnvelopeSettings { attack: 0.0, hold: 10.0, decay: 0.0, sustain: 1.0, release: 0.01 };
+        // ENV 3 has no fixed destination, so it can only be heard through the
+        // matrix. Give it a slow attack and route it at the amplitude.
+        config.mod_env = EnvelopeSettings { attack: 0.2, hold: 0.0, decay: 0.0, sustain: 1.0, release: 0.01 };
+        config.matrix[0] = ModSlot { source: ModSource::ModEnv, destination: ModDest::Amplitude, amount: -1.0 };
+
+        let mut voice = Voice::new(SAMPLE_RATE, 9);
+        let mut rng = Rng::new(9);
+        voice.start(60, 1.0, 0, 0, &config, None, 0.0, SAMPLE_RATE, 0, &mut rng);
+        let mut early = 0.0f32;
+        let mut late = 0.0f32;
+        for index in 0..8_000 {
+            let (left, _) = voice.process(&config);
+            // Before the mod envelope has risen the level is untouched; once it
+            // reaches its sustain the -1.0 row has pulled the voice to silence.
+            if index < 400 {
+                early = early.max(left.abs());
+            } else if index > 6_000 {
+                late = late.max(left.abs());
+            }
+        }
+        assert!(early > 0.01, "voice was silent before the mod envelope rose: {early}");
+        assert!(late < early * 0.2, "mod envelope never reached the amplitude: {early} -> {late}");
     }
 
     #[test]

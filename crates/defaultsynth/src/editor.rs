@@ -375,15 +375,17 @@ fn lfo_panel(cx: &mut Context) {
         .col_between(Pixels(d(6.0)))
         .height(Pixels(d(70.0)));
 
-        LfoDisplay::new(cx)
-            .class("display-well")
-            .height(Stretch(1.0));
-
-        Binding::new(cx, EditorData::lfo_tab, |cx, tab| match tab.get(cx) {
-            0 => lfo_controls(cx, |params| &params.lfo1),
-            1 => lfo_controls(cx, |params| &params.lfo2),
-            2 => lfo_controls(cx, |params| &params.lfo3),
-            _ => lfo_controls(cx, |params| &params.lfo4),
+        Binding::new(cx, EditorData::lfo_tab, |cx, tab| {
+            let select: fn(&DefaultSynthParams) -> &LfoParams = match tab.get(cx) {
+                0 => |params| &params.lfo1,
+                1 => |params| &params.lfo2,
+                2 => |params| &params.lfo3,
+                _ => |params| &params.lfo4,
+            };
+            LfoDisplay::new(cx, EditorData::params, move |params| &select(params).shape)
+                .class("display-well")
+                .height(Stretch(1.0));
+            lfo_controls(cx, select);
         });
     })
     .row_between(Pixels(d(24.0)))

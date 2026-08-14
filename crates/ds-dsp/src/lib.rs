@@ -7,6 +7,8 @@
 pub mod engine;
 pub mod envelope;
 pub mod filter;
+pub mod lfo;
+pub mod modulation;
 pub mod noise;
 pub mod oscillator;
 pub mod voice;
@@ -14,6 +16,8 @@ pub mod voice;
 pub use engine::{SynthEngine, VoiceMode, VoicingSettings};
 pub use envelope::{Envelope, EnvelopeSettings};
 pub use filter::{FilterMode, StateVariableFilter};
+pub use lfo::{Lfo, LfoSettings, LfoShape, LfoTrigger};
+pub use modulation::{ModDest, ModInputs, ModOutputs, ModSlot, ModSource, MOD_SLOTS};
 pub use noise::{Noise, NoiseColour};
 pub use oscillator::{midi_note_to_hz, Oscillator, Waveform};
 pub use voice::{OscSettings, Voice, VoiceSettings};

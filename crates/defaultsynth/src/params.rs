@@ -93,6 +93,146 @@ pub enum LfoTriggerParam {
     Envelope,
 }
 
+impl LfoTriggerParam {
+    pub fn to_dsp(self) -> ds_dsp::LfoTrigger {
+        match self {
+            Self::Trigger => ds_dsp::LfoTrigger::Trigger,
+            Self::Free => ds_dsp::LfoTrigger::Free,
+            Self::Envelope => ds_dsp::LfoTrigger::Envelope,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Enum)]
+pub enum LfoShapeParam {
+    Sine,
+    Triangle,
+    #[name = "Saw Up"]
+    SawUp,
+    #[name = "Saw Down"]
+    SawDown,
+    Square,
+    #[name = "S & H"]
+    SampleHold,
+}
+
+impl LfoShapeParam {
+    pub fn to_dsp(self) -> ds_dsp::LfoShape {
+        match self {
+            Self::Sine => ds_dsp::LfoShape::Sine,
+            Self::Triangle => ds_dsp::LfoShape::Triangle,
+            Self::SawUp => ds_dsp::LfoShape::SawUp,
+            Self::SawDown => ds_dsp::LfoShape::SawDown,
+            Self::Square => ds_dsp::LfoShape::Square,
+            Self::SampleHold => ds_dsp::LfoShape::SampleHold,
+        }
+    }
+}
+
+/// Modulation matrix source, mirroring [`ds_dsp::ModSource`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Enum)]
+pub enum ModSourceSlotParam {
+    #[name = "—"]
+    None,
+    #[name = "LFO 1"]
+    Lfo1,
+    #[name = "LFO 2"]
+    Lfo2,
+    #[name = "LFO 3"]
+    Lfo3,
+    #[name = "LFO 4"]
+    Lfo4,
+    #[name = "Amp Env"]
+    AmpEnv,
+    #[name = "Filter Env"]
+    FilterEnv,
+    #[name = "Mod Env"]
+    ModEnv,
+    Velocity,
+    #[name = "Key Track"]
+    KeyTrack,
+    #[name = "Mod Wheel"]
+    ModWheel,
+}
+
+impl ModSourceSlotParam {
+    pub fn to_dsp(self) -> ds_dsp::ModSource {
+        // The index order is shared with the DSP, so a new variant has to be
+        // added in the same position on both sides.
+        ds_dsp::ModSource::from_index(self as usize)
+    }
+}
+
+/// Modulation matrix destination, mirroring [`ds_dsp::ModDest`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Enum)]
+pub enum ModDestSlotParam {
+    #[name = "—"]
+    None,
+    Pitch,
+    #[name = "Filter A Cut"]
+    FilterACutoff,
+    #[name = "Filter B Cut"]
+    FilterBCutoff,
+    #[name = "Filter A Res"]
+    FilterAResonance,
+    #[name = "Amplitude"]
+    Amplitude,
+    Pan,
+    #[name = "OSC A Warp"]
+    OscAWarp,
+    #[name = "OSC B Warp"]
+    OscBWarp,
+    #[name = "OSC C Warp"]
+    OscCWarp,
+    #[name = "OSC A Level"]
+    OscALevel,
+    #[name = "OSC B Level"]
+    OscBLevel,
+    #[name = "OSC C Level"]
+    OscCLevel,
+    Detune,
+}
+
+impl ModDestSlotParam {
+    pub fn to_dsp(self) -> ds_dsp::ModDest {
+        ds_dsp::ModDest::from_index(self as usize)
+    }
+}
+
+/// One row of the modulation matrix.
+#[derive(Params)]
+pub struct ModSlotParams {
+    #[id = "src"]
+    pub source: EnumParam<ModSourceSlotParam>,
+    #[id = "dst"]
+    pub destination: EnumParam<ModDestSlotParam>,
+    #[id = "amt"]
+    pub amount: FloatParam,
+}
+
+impl Default for ModSlotParams {
+    fn default() -> Self {
+        Self {
+            source: EnumParam::new("Source", ModSourceSlotParam::None),
+            destination: EnumParam::new("Destination", ModDestSlotParam::None),
+            amount: FloatParam::new("Amount", 0.0, FloatRange::Linear { min: -1.0, max: 1.0 })
+                .with_smoother(SmoothingStyle::Linear(20.0))
+                .with_value_to_string(formatters::v2s_f32_percentage(0))
+                .with_string_to_value(formatters::s2v_f32_percentage()),
+        }
+    }
+}
+
+impl ModSlotParams {
+    pub fn to_dsp(&self) -> ds_dsp::ModSlot {
+        ds_dsp::ModSlot {
+            source: self.source.value().to_dsp(),
+            destination: self.destination.value().to_dsp(),
+            amount: self.amount.value(),
+        }
+    }
+}
+
 /// Tempo-locked LFO rate, used instead of the free-running Hz rate while BPM
 /// sync is on. The TRIP and DOT toggles scale whichever division is picked.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Enum)]
@@ -463,6 +603,8 @@ impl FilterParams {
 pub struct LfoParams {
     #[id = "trig"]
     pub trigger: EnumParam<LfoTriggerParam>,
+    #[id = "shape"]
+    pub shape: EnumParam<LfoShapeParam>,
     /// Free-running rate, used while BPM sync is off.
     #[id = "rate"]
     pub rate: FloatParam,
@@ -490,6 +632,7 @@ impl Default for LfoParams {
     fn default() -> Self {
         Self {
             trigger: EnumParam::new("Trigger", LfoTriggerParam::Trigger),
+            shape: EnumParam::new("Shape", LfoShapeParam::Sine),
             rate: FloatParam::new(
                 "Rate",
                 2.0,
@@ -629,6 +772,9 @@ pub struct DefaultSynthParams {
     #[nested(id_prefix = "lfo4", group = "LFO 4")]
     pub lfo4: LfoParams,
 
+    #[nested(array, group = "Mod Matrix")]
+    pub matrix: [ModSlotParams; ds_dsp::MOD_SLOTS],
+
     #[nested(id_prefix = "voc", group = "Voicing")]
     pub voicing: VoicingParams,
 
@@ -653,6 +799,7 @@ impl Default for DefaultSynthParams {
             lfo2: LfoParams::default(),
             lfo3: LfoParams::default(),
             lfo4: LfoParams::default(),
+            matrix: Default::default(),
             voicing: VoicingParams::default(),
             // The minimum must stay above zero: logarithmic smoothing interpolates
             // in the log domain, so a target of exactly 0.0 yields NaN samples.

@@ -4,9 +4,12 @@
 //! None of these are hooked to a running signal yet, so each draws the shape its
 //! own parameters describe rather than pretending to show live analysis.
 
+use crate::params::LfoShapeParam as LfoShape;
 use ds_dsp::FilterMode;
 use nih_plug_vizia::vizia::prelude::*;
+use nih_plug::prelude::*;
 use nih_plug_vizia::vizia::vg;
+use nih_plug_vizia::widgets::param_base::ParamWidgetBase;
 
 /// Points along each drawn curve.
 const POINTS: usize = 160;
@@ -73,12 +76,43 @@ fn stroke_curve(cx: &mut DrawContext, canvas: &mut Canvas, sample: impl Fn(f32) 
     canvas.stroke_path(&path, &paint);
 }
 
-/// One cycle of an LFO shape.
-pub struct LfoDisplay;
+/// The LFO well: draws the running shape, and steps to the next one when clicked.
+///
+/// The design gives the LFO panel one long selector box, and its label is TRIG,
+/// so there is no drawn control left for the shape. Rather than inventing a box
+/// the design does not have, the well itself is the shape control.
+pub struct LfoDisplay {
+    param_base: ParamWidgetBase,
+    shapes: usize,
+}
 
 impl LfoDisplay {
-    pub fn new(cx: &mut Context) -> Handle<'_, Self> {
-        Self.build(cx, |_| {})
+    pub fn new<L, Params, P, FMap>(cx: &mut Context, params: L, params_to_param: FMap) -> Handle<'_, Self>
+    where
+        L: Lens<Target = Params> + Clone,
+        Params: 'static,
+        P: Param + 'static,
+        FMap: Fn(&Params) -> &P + Copy + 'static,
+    {
+        let shapes = ParamWidgetBase::new(cx, params.clone(), params_to_param).step_count().unwrap_or(0) + 1;
+        Self { param_base: ParamWidgetBase::new(cx, params, params_to_param), shapes }
+            .build(cx, ParamWidgetBase::build_view(params, params_to_param, move |_cx, _data| {}))
+    }
+
+    fn shape(&self) -> LfoShape {
+        let steps = (self.shapes - 1).max(1) as f32;
+        let index = (self.param_base.unmodulated_normalized_value() * steps).round() as usize;
+        LfoShape::from_index(index)
+    }
+
+    /// Advances to the next shape, wrapping past the last one.
+    fn cycle(&self, cx: &mut EventContext) {
+        let steps = (self.shapes - 1).max(1) as f32;
+        let index = (self.param_base.unmodulated_normalized_value() * steps).round() as usize;
+        let next = (index + 1) % self.shapes;
+        self.param_base.begin_set_parameter(cx);
+        self.param_base.set_normalized_value(cx, next as f32 / steps);
+        self.param_base.end_set_parameter(cx);
     }
 }
 
@@ -87,14 +121,55 @@ impl View for LfoDisplay {
         Some("lfo-display")
     }
 
+    fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
+        event.map(|window_event, meta| {
+            if let WindowEvent::MouseDown(MouseButton::Left) = window_event {
+                self.cycle(cx);
+                meta.consume();
+            }
+        });
+    }
+
     fn draw(&self, cx: &mut DrawContext, canvas: &mut Canvas) {
         if cx.bounds().w <= 4.0 {
             return;
         }
-        // A single sine cycle, as drawn in the reference. Editable shapes arrive
-        // with the LFO engine.
-        stroke_curve(cx, canvas, |t| Some(0.5 - 0.5 * (t * std::f32::consts::TAU).cos()));
+        let shape = self.shape();
+        // Two cycles, so a sample-and-hold or a saw reads as repeating rather
+        // than as a single ramp.
+        stroke_curve(cx, canvas, move |t| Some(lfo_level(shape, (t * 2.0).fract())));
     }
+}
+
+/// One LFO cycle mapped to the well's 0..1 vertical range.
+///
+/// Sample-and-hold is random by nature, so the display shows a fixed set of
+/// steps: an honest picture of "stepped random" without redrawing every frame.
+fn lfo_level(shape: LfoShape, phase: f32) -> f32 {
+    const HELD_STEPS: [f32; 8] = [0.3, -0.7, 0.9, -0.2, 0.55, -0.95, 0.15, -0.45];
+    let bipolar = match shape {
+        LfoShape::Sine => (phase * std::f32::consts::TAU).sin(),
+        LfoShape::Triangle => {
+            if phase < 0.25 {
+                phase * 4.0
+            } else if phase < 0.75 {
+                2.0 - phase * 4.0
+            } else {
+                phase * 4.0 - 4.0
+            }
+        }
+        LfoShape::SawUp => phase * 2.0 - 1.0,
+        LfoShape::SawDown => 1.0 - phase * 2.0,
+        LfoShape::Square => {
+            if phase < 0.5 {
+                1.0
+            } else {
+                -1.0
+            }
+        }
+        LfoShape::SampleHold => HELD_STEPS[((phase * 8.0) as usize).min(7)],
+    };
+    bipolar * 0.5 + 0.5
 }
 
 /// Magnitude response of a filter, drawn from its own cutoff and resonance.
