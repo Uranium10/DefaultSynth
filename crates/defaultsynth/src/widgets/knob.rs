@@ -156,6 +156,12 @@ impl View for Knob {
             return;
         }
 
+        // This widget paints its own body, so it also has to run the shadow pass
+        // the default View::draw would have done. The element's border-radius is
+        // 50%, which makes build_path trace the dial's own circle.
+        let mut shadow_path = cx.build_path();
+        cx.draw_shadows(canvas, &mut shadow_path);
+
         let opacity = cx.opacity();
         let value = self.param_base.unmodulated_normalized_value().clamp(0.0, 1.0);
         let default = self.param_base.default_normalized_value().clamp(0.0, 1.0);

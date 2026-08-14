@@ -274,6 +274,9 @@ impl View for EnvelopeDisplay {
         }
 
         let mut path = cx.build_path();
+        // The default View::draw runs shadows before the background; overriding
+        // draw means doing that here too, or the CSS box-shadow never appears.
+        cx.draw_shadows(canvas, &mut path);
         cx.draw_background(canvas, &mut path);
 
         let opacity = cx.opacity();

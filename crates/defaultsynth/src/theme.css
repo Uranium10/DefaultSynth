@@ -49,6 +49,12 @@
 
 /* ---- Section panels -------------------------------------------------- */
 
+/*
+ * Panel shadow, transcribed from the SVG's filters: black at 40% alpha, offset
+ * +10 +10 design units, Gaussian sigma 6.111. VIZIA halves blur-radius to get
+ * sigma, so the radius is twice the design's. At this window scale that lands on
+ * roughly 2.7px offset and 3.3px radius.
+ */
 .panel {
     background-color: #dfdfdf;
     border-radius: 10px;
@@ -56,6 +62,7 @@
     border-color: #cacaca;
     child-space: 9px;
     row-between: 7px;
+    box-shadow: 2.7px 2.7px 3.3px #00000066;
 }
 
 .panel-header {
@@ -120,6 +127,9 @@ power-dot {
 knob {
     width: 50px;
     height: 50px;
+    /* build_path uses these, so the shadow comes out round. */
+    border-radius: 50%;
+    box-shadow: 1.4px 1.4px 2.2px #00000059;
     background-color: #eeeeee;
     border-color: #b6b6b6;
     selection-color: #15d8ff;
@@ -142,6 +152,7 @@ wave-display {
     background-color: #404040;
     border-radius: 8px;
     color: #15d8ff;
+    box-shadow: 1.4px 1.4px 2.6px #00000059;
 }
 
 /*
@@ -151,6 +162,7 @@ wave-display {
 envelope-display {
     background-color: #404040;
     border-radius: 8px;
+    box-shadow: 1.4px 1.4px 2.6px #00000059;
     color: #eaf7fc;
     selection-color: #15d8ff;
     border-color: #9aa4a8;
@@ -360,6 +372,7 @@ ab-slider {
 lfo-display, filter-response, curve-box {
     background-color: #404040;
     border-radius: 8px;
+    box-shadow: 1.4px 1.4px 2.6px #00000059;
     selection-color: #15d8ff;
 }
 

@@ -71,3 +71,10 @@
 - 레이아웃 버그 두 건 수정: VIZIA 뷰의 기본 layout-type이 column이라 RadioDot의 캡션이 닷 옆이 아니라 아래로 내려가 있었음(layout-type: row 지정). 그리고 루트 패딩·행 간격이 editor.rs의 높이 예산에 포함되지 않아 하단이 3px 잘렸음(패딩 7px, 행 간격 6px로 맞춤).
 - 검증: 워크스페이스 테스트 64개 통과, cargo check 경고 0, CLAP·VST3·스탠드얼론 빌드 성공, clap-validator 31/44 유지. 실행 화면 캡처로 모든 패널이 잘림 없이 표시되는 것을 확인함.
 - 다음: EFFECT/MATRIX/GLOBAL 페이지를 같은 방식으로 그리거나, 여기서 방향을 돌려 LFO·모드 매트릭스 DSP를 붙여 지금 그려둔 컨트롤을 살리는 것.
+
+## 2026-08-14 10:04:00 +09:00
+- 그림자 구현 가능 여부를 확인함. VIZIA는 box-shadow를 완전히 지원하며(오프셋·블러·스프레드·색상·inset), 오프스크린 이미지에 실제 가우시안 블러를 걸어 엔티티별로 캐시함. 문법은 표준 CSS와 같음.
+- 그림자를 쓰지 못하고 있던 원인을 찾음. VIZIA 기본 View::draw는 draw_shadows -> draw_background -> draw_border 순으로 그리는데, 내 커스텀 위젯들은 draw를 오버라이드하면서 draw_background만 호출해 그림자 단계를 통째로 건너뛰고 있었음.
+- Synth.svg의 필터 63개에서 실제 그림자 스펙을 추출함. RGB를 0으로 눌러 검정으로 만들고 알파에 slope 0.4를 거는 feComponentTransfer, stdDeviation 6.111(일부 3.056), 그리고 그림자 도형이 원본보다 +10 +10만큼 이동해 있음. VIZIA는 blur-radius를 절반으로 나눠 시그마로 쓰므로 반지름은 디자인 시그마의 두 배로 지정함.
+- 적용: 패널에 2.7px 2.7px 3.3px #00000066, 디스플레이 우물과 노브에 더 얕은 값. 노브는 자체적으로 원을 그리므로 border-radius 50%를 주어 build_path가 원을 만들게 하고 draw_shadows를 직접 호출함. wave/envelope/curve 디스플레이에도 같은 호출을 추가함.
+- 검증: 워크스페이스 테스트 64개 통과, cargo check 경고 0, CLAP·VST3·스탠드얼론 빌드 성공, 실행 화면에서 패널·우물·노브 그림자가 모두 렌더되는 것을 확인함.
