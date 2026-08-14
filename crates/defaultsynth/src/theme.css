@@ -454,11 +454,25 @@ ab-slider {
 
 /* ---- Remaining display wells ----------------------------------------- */
 
-lfo-display, filter-response, curve-box {
+filter-response, curve-box {
     background-color: #404040;
     border-radius: 8px;
     box-shadow: 1.4px 1.4px 2.6px #00000059;
     selection-color: #15d8ff;
+}
+
+/*
+ * The drawable LFO well. selection-color is the trace, the breakpoint rings and
+ * the bend handle; color fills the breakpoint centres, the same split the
+ * envelope editor uses so the two read as one family.
+ */
+lfo-editor {
+    background-color: #404040;
+    border-radius: 8px;
+    box-shadow: 1.4px 1.4px 2.6px #00000059;
+    selection-color: #15d8ff;
+    color: #eaf7fc;
+    cursor: arrow;
 }
 
 .field-text {

@@ -1,5 +1,7 @@
 //! Host-visible parameters, grouped to mirror the panels in the UI design.
 
+use crossbeam::atomic::AtomicCell;
+use ds_dsp::LfoCurve;
 use nih_plug::prelude::*;
 use std::sync::Arc;
 
@@ -114,6 +116,10 @@ pub enum LfoShapeParam {
     Square,
     #[name = "S & H"]
     SampleHold,
+    /// The shape drawn in the LFO well. Selecting it on its own changes nothing;
+    /// any edit in the well switches to it and seeds the curve from whichever
+    /// shape was showing.
+    Custom,
 }
 
 impl LfoShapeParam {
@@ -125,6 +131,7 @@ impl LfoShapeParam {
             Self::SawDown => ds_dsp::LfoShape::SawDown,
             Self::Square => ds_dsp::LfoShape::Square,
             Self::SampleHold => ds_dsp::LfoShape::SampleHold,
+            Self::Custom => ds_dsp::LfoShape::Custom,
         }
     }
 }
@@ -772,6 +779,25 @@ pub struct DefaultSynthParams {
     #[nested(id_prefix = "lfo4", group = "LFO 4")]
     pub lfo4: LfoParams,
 
+    /// The four drawn LFO shapes.
+    ///
+    /// Persisted rather than exposed as parameters: a curve is a variable-length
+    /// structure, and there is no honest way to present that as a list of floats
+    /// a host could automate. `AtomicCell` because the audio thread reads one per
+    /// block and must not take a lock to do it.
+    ///
+    /// Four separate keys rather than one per `LfoParams`: persisted keys are
+    /// collected into a single flat map, so a shared name would have the four
+    /// LFOs quietly overwriting each other's shapes.
+    #[persist = "lfo1curve"]
+    pub lfo1_curve: Arc<AtomicCell<LfoCurve>>,
+    #[persist = "lfo2curve"]
+    pub lfo2_curve: Arc<AtomicCell<LfoCurve>>,
+    #[persist = "lfo3curve"]
+    pub lfo3_curve: Arc<AtomicCell<LfoCurve>>,
+    #[persist = "lfo4curve"]
+    pub lfo4_curve: Arc<AtomicCell<LfoCurve>>,
+
     #[nested(array, group = "Mod Matrix")]
     pub matrix: [ModSlotParams; ds_dsp::MOD_SLOTS],
 
@@ -799,6 +825,10 @@ impl Default for DefaultSynthParams {
             lfo2: LfoParams::default(),
             lfo3: LfoParams::default(),
             lfo4: LfoParams::default(),
+            lfo1_curve: Arc::new(AtomicCell::new(LfoCurve::from_shape(ds_dsp::LfoShape::Sine))),
+            lfo2_curve: Arc::new(AtomicCell::new(LfoCurve::from_shape(ds_dsp::LfoShape::Sine))),
+            lfo3_curve: Arc::new(AtomicCell::new(LfoCurve::from_shape(ds_dsp::LfoShape::Sine))),
+            lfo4_curve: Arc::new(AtomicCell::new(LfoCurve::from_shape(ds_dsp::LfoShape::Sine))),
             matrix: Default::default(),
             voicing: VoicingParams::default(),
             // The minimum must stay above zero: logarithmic smoothing interpolates

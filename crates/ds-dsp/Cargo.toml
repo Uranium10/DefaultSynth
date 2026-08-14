@@ -9,3 +9,10 @@ authors.workspace = true
 # Deliberately free of plugin-framework dependencies so the DSP can be unit-tested
 # with a plain `cargo test` and reused outside a plugin host.
 [dependencies]
+
+# Only the drawn LFO curve needs to leave the process, and only so the host can
+# save it with the session. The DSP itself never touches serde.
+serde = { version = "1", features = ["derive"], optional = true }
+
+[features]
+serde = ["dep:serde"]

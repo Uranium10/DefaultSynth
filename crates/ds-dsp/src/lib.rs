@@ -4,6 +4,7 @@
 //! samples and notes, not about VST3, CLAP or GUI toolkits. That keeps the DSP
 //! unit-testable with a plain `cargo test` and reusable outside a plugin host.
 
+pub mod curve;
 pub mod engine;
 pub mod envelope;
 pub mod filter;
@@ -13,6 +14,7 @@ pub mod noise;
 pub mod oscillator;
 pub mod voice;
 
+pub use curve::{CurvePoint, LfoCurve, MAX_CURVE_POINTS};
 pub use engine::{SynthEngine, VoiceMode, VoicingSettings};
 pub use envelope::{Envelope, EnvelopeSettings};
 pub use filter::{FilterMode, StateVariableFilter};

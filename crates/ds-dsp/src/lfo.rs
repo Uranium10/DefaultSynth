@@ -4,6 +4,7 @@
 //! all about band-limiting, while an LFO runs far below hearing and instead
 //! needs a delay, a fade-in, and a choice of how it lines up with each note.
 
+use crate::curve::LfoCurve;
 use crate::Rng;
 
 /// LFO shapes. `SampleHold` steps to a new random level once per cycle.
@@ -15,6 +16,8 @@ pub enum LfoShape {
     SawDown,
     Square,
     SampleHold,
+    /// Whatever the player has drawn in the LFO well.
+    Custom,
 }
 
 impl LfoShape {
@@ -25,7 +28,8 @@ impl LfoShape {
             2 => Self::SawUp,
             3 => Self::SawDown,
             4 => Self::Square,
-            _ => Self::SampleHold,
+            5 => Self::SampleHold,
+            _ => Self::Custom,
         }
     }
 }
@@ -62,6 +66,11 @@ pub struct LfoSettings {
     pub delay: f32,
     /// Seconds spent fading from no depth to full depth, after the delay.
     pub rise: f32,
+    /// The drawn shape, read only when `shape` is [`LfoShape::Custom`].
+    ///
+    /// Carried by value rather than behind a reference so these settings stay
+    /// plain `Copy` data the audio thread can hold without any locking.
+    pub curve: LfoCurve,
 }
 
 impl Default for LfoSettings {
@@ -72,6 +81,7 @@ impl Default for LfoSettings {
             frequency: 2.0,
             delay: 0.0,
             rise: 0.0,
+            curve: LfoCurve::default(),
         }
     }
 }
@@ -165,7 +175,7 @@ impl Lfo {
             self.held_cycle = self.cycle;
             self.held = self.rng.next_bipolar();
         }
-        let raw = shape_at(settings.shape, self.phase, self.held);
+        let raw = shape_at(settings, self.phase, self.held);
 
         // Rise measured from the end of the delay, so the two stack rather than
         // the fade being eaten by the wait.
@@ -197,8 +207,8 @@ impl Lfo {
     }
 }
 
-fn shape_at(shape: LfoShape, phase: f32, held: f32) -> f32 {
-    match shape {
+fn shape_at(settings: &LfoSettings, phase: f32, held: f32) -> f32 {
+    match settings.shape {
         LfoShape::Sine => (phase * std::f32::consts::TAU).sin(),
         LfoShape::Triangle => {
             // Starts at 0, peaks at a quarter, troughs at three quarters.
@@ -221,6 +231,7 @@ fn shape_at(shape: LfoShape, phase: f32, held: f32) -> f32 {
         }
         // The level is redrawn once per cycle by the caller and simply held here.
         LfoShape::SampleHold => held,
+        LfoShape::Custom => settings.curve.sample_bipolar(phase),
     }
 }
 
@@ -421,6 +432,57 @@ mod tests {
         // Triplets are faster, dotted slower.
         assert!(sync_frequency(0.25, 120.0, true, false) > 2.0);
         assert!(sync_frequency(0.25, 120.0, false, true) < 2.0);
+    }
+
+    #[test]
+    fn a_drawn_curve_is_what_the_custom_shape_runs() {
+        use crate::curve::CurvePoint;
+
+        // A spike a third of the way in, so the output is unmistakable.
+        let curve = LfoCurve::from_points(&[
+            CurvePoint::new(0.0, 0.0),
+            CurvePoint::new(1.0 / 3.0, 1.0),
+            CurvePoint::new(1.0, 0.0),
+        ]);
+        let config = LfoSettings { shape: LfoShape::Custom, frequency: 1.0, curve, ..LfoSettings::default() };
+
+        let mut lfo = Lfo::new(3);
+        lfo.set_sample_rate(SAMPLE_RATE);
+        lfo.trigger();
+        let values = run(&mut lfo, &config, SAMPLE_RATE as usize);
+
+        // The curve is unipolar 0..1 and the LFO is bipolar, so the peak is +1
+        // and both ends are -1.
+        let peak_at = (SAMPLE_RATE / 3.0) as usize;
+        assert!((values[peak_at] - 1.0).abs() < 0.01, "peak was {}", values[peak_at]);
+        assert!((values[0] + 1.0).abs() < 0.01, "start was {}", values[0]);
+        assert!((values[values.len() - 1] + 1.0).abs() < 0.02, "end was {}", values[values.len() - 1]);
+    }
+
+    #[test]
+    fn a_drawn_curve_does_not_step_when_the_cycle_wraps() {
+        use crate::curve::CurvePoint;
+
+        // Deliberately asks for ends that disagree; the curve has to reconcile
+        // them, or every wrap would put a click into whatever this modulates.
+        let curve = LfoCurve::from_points(&[
+            CurvePoint::new(0.0, 0.2),
+            CurvePoint::new(0.5, 1.0),
+            CurvePoint::new(1.0, 0.9),
+        ]);
+        let config = LfoSettings { shape: LfoShape::Custom, frequency: 1.0, curve, ..LfoSettings::default() };
+
+        let mut lfo = Lfo::new(3);
+        lfo.set_sample_rate(SAMPLE_RATE);
+        lfo.trigger();
+        let values = run(&mut lfo, &config, (SAMPLE_RATE * 2.0) as usize);
+        let biggest_step = values
+            .windows(2)
+            .map(|pair| (pair[1] - pair[0]).abs())
+            .fold(0.0f32, f32::max);
+        // One cycle a second at 48 kHz: a smooth curve moves a tiny fraction per
+        // sample, so anything larger is a discontinuity.
+        assert!(biggest_step < 0.01, "the curve stepped by {biggest_step}");
     }
 
     #[test]

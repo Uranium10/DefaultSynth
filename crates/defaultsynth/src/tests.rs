@@ -153,7 +153,15 @@ fn matrix_enum_indices_match_the_dsp_ones() {
     // destination is a row the player cannot use.
     assert_eq!(ModSourceSlotParam::variants().len(), 11);
     assert_eq!(ModDestSlotParam::variants().len(), 14);
-    assert_eq!(LfoShapeParam::variants().len(), 6);
+    // Six built-in shapes plus the drawn one.
+    assert_eq!(LfoShapeParam::variants().len(), 7);
+    for index in 0..LfoShapeParam::variants().len() {
+        assert_eq!(
+            LfoShapeParam::from_index(index).to_dsp(),
+            ds_dsp::LfoShape::from_index(index),
+            "shape index {index} disagrees"
+        );
+    }
     assert_eq!(LfoTriggerParam::variants().len(), 3);
 }
 
@@ -165,5 +173,73 @@ fn every_matrix_slot_starts_disconnected() {
     for (index, slot) in params.matrix.iter().enumerate() {
         assert_eq!(slot.to_dsp().source, ds_dsp::ModSource::None, "slot {index} starts routed");
         assert_eq!(slot.to_dsp().destination, ds_dsp::ModDest::None, "slot {index} starts routed");
+    }
+}
+
+#[test]
+fn each_lfo_keeps_its_own_drawn_curve() {
+    use ds_dsp::{CurvePoint, LfoCurve};
+
+    let params = DefaultSynthParams::default();
+    // Persisted fields land in one flat map, so a shared key would have the four
+    // LFOs silently overwriting each other. Give each a distinguishable shape.
+    for (index, curve) in [&params.lfo1_curve, &params.lfo2_curve, &params.lfo3_curve, &params.lfo4_curve]
+        .into_iter()
+        .enumerate()
+    {
+        let height = (index + 1) as f32 / 8.0;
+        curve.store(LfoCurve::from_points(&[
+            CurvePoint::new(0.0, 0.0),
+            CurvePoint::new(0.5, height),
+            CurvePoint::new(1.0, 0.0),
+        ]));
+    }
+
+    let fields = params.serialize_fields();
+    for key in ["lfo1curve", "lfo2curve", "lfo3curve", "lfo4curve"] {
+        assert!(fields.contains_key(key), "{key} was not persisted");
+    }
+
+    let restored = DefaultSynthParams::default();
+    for (key, value) in &fields {
+        restored.deserialize_fields(&std::collections::BTreeMap::from([(key.clone(), value.clone())]));
+    }
+    for (index, curve) in
+        [&restored.lfo1_curve, &restored.lfo2_curve, &restored.lfo3_curve, &restored.lfo4_curve]
+            .into_iter()
+            .enumerate()
+    {
+        let expected = (index + 1) as f32 / 8.0;
+        let peak = curve.load().sample(0.5);
+        assert!((peak - expected).abs() < 1e-5, "LFO {} came back as {peak}, wanted {expected}", index + 1);
+    }
+}
+
+#[test]
+fn a_drawn_curve_survives_being_saved_and_loaded() {
+    use ds_dsp::{CurvePoint, LfoCurve};
+
+    let params = DefaultSynthParams::default();
+    let drawn = LfoCurve::from_points(&[
+        CurvePoint::new(0.0, 0.25),
+        CurvePoint { x: 0.2, y: 1.0, tension: 0.7 },
+        CurvePoint { x: 0.6, y: 0.1, tension: -0.4 },
+        CurvePoint::new(1.0, 0.25),
+    ]);
+    params.lfo1_curve.store(drawn);
+
+    let restored = DefaultSynthParams::default();
+    restored.deserialize_fields(&params.serialize_fields());
+
+    let loaded = restored.lfo1_curve.load();
+    assert_eq!(loaded.len(), drawn.len(), "point count changed");
+    for step in 0..=100 {
+        let phase = step as f32 / 100.0;
+        assert!(
+            (loaded.sample(phase) - drawn.sample(phase)).abs() < 1e-5,
+            "curve changed at {phase}: {} vs {}",
+            loaded.sample(phase),
+            drawn.sample(phase)
+        );
     }
 }

@@ -19,13 +19,15 @@
 //! clips overflowing children instead of shrinking them: if a row's parts do not
 //! add up, the bottom of the window silently loses content.
 
+use crossbeam::atomic::AtomicCell;
+use ds_dsp::LfoCurve;
 use nih_plug::prelude::*;
 use nih_plug_vizia::vizia::prelude::*;
 use nih_plug_vizia::{assets, create_vizia_editor, ViziaState, ViziaTheming};
 use std::sync::Arc;
 
-use crate::params::{DefaultSynthParams, EnvParams, FilterParams, LfoParams, OscParams};
-use crate::widgets::{AbSlider, CurveBox, EnvelopeDisplay, FilterResponse, Field, Knob, LfoDisplay, ParamDropdown, PowerDot, RadioDot, WaveDisplay};
+use crate::params::{DefaultSynthParams, EnvParams, FilterParams, LfoParams, LfoShapeParam, OscParams};
+use crate::widgets::{AbSlider, CurveBox, EnvelopeDisplay, FilterResponse, Field, Knob, LfoEditor, ParamDropdown, PowerDot, RadioDot, WaveDisplay};
 
 // ---- Scale -------------------------------------------------------------
 
@@ -376,13 +378,19 @@ fn lfo_panel(cx: &mut Context) {
         .height(Pixels(d(70.0)));
 
         Binding::new(cx, EditorData::lfo_tab, |cx, tab| {
-            let select: fn(&DefaultSynthParams) -> &LfoParams = match tab.get(cx) {
-                0 => |params| &params.lfo1,
-                1 => |params| &params.lfo2,
-                2 => |params| &params.lfo3,
-                _ => |params| &params.lfo4,
+            // Plain function pointers rather than closures: the widgets store
+            // these for the life of the view, and a closure that captured the
+            // tab index could not be one.
+            type SelectLfo = fn(&DefaultSynthParams) -> &LfoParams;
+            type SelectShape = fn(&DefaultSynthParams) -> &EnumParam<LfoShapeParam>;
+            type SelectCurve = fn(&DefaultSynthParams) -> &Arc<AtomicCell<LfoCurve>>;
+            let (select, shape, curve): (SelectLfo, SelectShape, SelectCurve) = match tab.get(cx) {
+                0 => (|p| &p.lfo1, |p| &p.lfo1.shape, |p| &p.lfo1_curve),
+                1 => (|p| &p.lfo2, |p| &p.lfo2.shape, |p| &p.lfo2_curve),
+                2 => (|p| &p.lfo3, |p| &p.lfo3.shape, |p| &p.lfo3_curve),
+                _ => (|p| &p.lfo4, |p| &p.lfo4.shape, |p| &p.lfo4_curve),
             };
-            LfoDisplay::new(cx, EditorData::params, move |params| &select(params).shape)
+            LfoEditor::new(cx, EditorData::params, curve, shape)
                 .class("display-well")
                 .height(Stretch(1.0));
             lfo_controls(cx, select);

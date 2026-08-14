@@ -12,6 +12,11 @@ authors.workspace = true
 crate-type = ["cdylib", "lib"]
 
 [dependencies]
-ds-dsp = { path = "../ds-dsp" }
+ds-dsp = { path = "../ds-dsp", features = ["serde"] }
 nih_plug = { workspace = true }
 nih_plug_vizia = { workspace = true }
+
+# The drawn LFO curve is plain Copy data, so an AtomicCell hands it to the audio
+# thread without a mutex and without allocating.
+crossbeam = "0.8"
+serde = { version = "1", features = ["derive"] }

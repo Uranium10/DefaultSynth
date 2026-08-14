@@ -51,7 +51,7 @@ impl DefaultSynth {
     ///
     /// The DSP core only speaks in cycles per second, which keeps the transport
     /// out of it; this is the one place that has to know the host's tempo.
-    fn lfo_settings(&self, params: &params::LfoParams) -> ds_dsp::LfoSettings {
+    fn lfo_settings(&self, params: &params::LfoParams, curve: &crossbeam::atomic::AtomicCell<ds_dsp::LfoCurve>) -> ds_dsp::LfoSettings {
         let frequency = if params.sync_bpm.value() {
             ds_dsp::lfo::sync_frequency(
                 params.sync_rate.value().cycle_in_whole_notes(),
@@ -68,6 +68,9 @@ impl DefaultSynth {
             frequency,
             delay: params.delay.value(),
             rise: params.rise.value(),
+            // A plain read: the cell holds Copy data, so the audio thread takes a
+            // snapshot without blocking whatever the editor is doing to it.
+            curve: curve.load(),
         }
     }
 
@@ -104,10 +107,10 @@ impl DefaultSynth {
             filter_b_input_from_a: params.filter_b.input_from_filter_a.value(),
             velocity_curve: params.voicing.velocity_curve.value(),
             lfo: [
-                self.lfo_settings(&params.lfo1),
-                self.lfo_settings(&params.lfo2),
-                self.lfo_settings(&params.lfo3),
-                self.lfo_settings(&params.lfo4),
+                self.lfo_settings(&params.lfo1, &params.lfo1_curve),
+                self.lfo_settings(&params.lfo2, &params.lfo2_curve),
+                self.lfo_settings(&params.lfo3, &params.lfo3_curve),
+                self.lfo_settings(&params.lfo4, &params.lfo4_curve),
             ],
             matrix: std::array::from_fn(|index| params.matrix[index].to_dsp()),
             mod_wheel: self.mod_wheel,
