@@ -63,7 +63,7 @@
 - 방향 결정: 비주얼 우선. 디자인의 모든 컨트롤을 먼저 그리고, 대응 DSP가 없는 것은 나중에 이어서 붙임. 따라서 당분간 동작하지 않는 컨트롤이 화면에 존재하는 것을 허용함.
 - 다음 착수 지점: 상단 탭바(OSC/EFFECT/MATRIX/GLOBAL)와 프리셋 브라우저, LFO 섹션, DIR와 FM 라우팅, 필터 입력 A/B/C/N 선택과 DRIVE/FREQ/MIX, 노이즈 KEYTRACK/PITCH, MONO/LEGATO, NOTE/VELO 커브.
 
-## 2026-08-14 09:20:00 +09:00
+## 2026-08-14 09:26:25 +09:00
 - OSC 탭을 화면상 완성함. 상단 페이지 탭(OSC/EFFECT/MATRIX/GLOBAL)과 프리셋 바, MASTER, 오실레이터 3개, ENV 1–3 탭, LFO 1–4 탭, NOISE, FILTER A/B, VOICING을 모두 배치하고 전 컨트롤을 실제 파라미터에 연결함.
 - SVG에서 패널 경계를 실측해 레이아웃 기준으로 삼음. OSC 패널 x=269 w=1986 h=562 피치 640, ENV x=2316 y=223 1604x824, LFO x=2317 y=1131 동일 크기, 하단 4패널 y=2099 h=563에 폭 608/967/967/966. 이 과정에서 VOICING이 우측 컬럼이 아니라 하단 네 번째 패널이라는 것을 발견해 위치를 고침.
 - 파라미터 32개를 추가함. OSC의 direct_out과 mod_source, 필터의 input_a/b/c/noise·pan·drive·freq·mix, 노이즈의 pitch·keytrack, LFO 4세트(trigger·rate·rise·delay·bpm·triplet·anchor·dotted), 모드 엔벨로프, VOICING의 note_curve. 비주얼 우선 방향에 따라 DSP 연결은 나중으로 미루되 파라미터는 지금 확정해 나중에 위젯을 교체하지 않아도 되게 함.
