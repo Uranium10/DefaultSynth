@@ -13,8 +13,15 @@
 /// per block without thinking about it.
 pub const MAX_CURVE_POINTS: usize = 32;
 
-/// How far a bend can be pushed either way.
-const MAX_BEND_EXPONENT: f32 = 3.0;
+/// Closest the halfway point of a bent segment may come to either end.
+///
+/// At exactly 0 or 1 the curve stops being a curve and turns into a corner, and
+/// the arithmetic that places it divides by zero.
+const MIN_MIDPOINT: f32 = 0.02;
+
+/// Bend that makes a straight quarter-segment pass through a sine's halfway
+/// height, `sin(45 deg)`, which is `2 * (0.7071 - 0.5)`.
+const SINE_TENSION: f32 = 0.414_213_57;
 
 /// One breakpoint.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -248,13 +255,13 @@ impl LfoCurve {
         use crate::LfoShape;
         match shape {
             // A seed, not a reproduction: five points a player can actually
-            // grab, bent to the tension whose midpoint matches a real sine
-            // (t^0.5 passes through 0.7071 at the halfway mark).
+            // grab. A quarter of a sine is halfway up at sin(45 deg) = 0.7071,
+            // and tension is twice the distance of the midpoint from centre.
             LfoShape::Sine => Self::from_points(&[
-                CurvePoint { x: 0.0, y: 0.5, tension: 1.0 / 3.0 },
-                CurvePoint { x: 0.25, y: 1.0, tension: -1.0 / 3.0 },
-                CurvePoint { x: 0.5, y: 0.5, tension: 1.0 / 3.0 },
-                CurvePoint { x: 0.75, y: 0.0, tension: -1.0 / 3.0 },
+                CurvePoint { x: 0.0, y: 0.5, tension: SINE_TENSION },
+                CurvePoint { x: 0.25, y: 1.0, tension: -SINE_TENSION },
+                CurvePoint { x: 0.5, y: 0.5, tension: SINE_TENSION },
+                CurvePoint { x: 0.75, y: 0.0, tension: -SINE_TENSION },
                 CurvePoint { x: 1.0, y: 0.5, tension: 0.0 },
             ]),
             LfoShape::Triangle => Self::from_points(&[
@@ -305,15 +312,24 @@ impl From<LfoCurve> for Vec<CurvePoint> {
 
 /// Warps a `0..1` position along a segment.
 ///
-/// A power curve rather than a spline: it is monotonic, hits both ends exactly,
-/// and one number describes the whole bend, which is what a single drag handle
-/// can express.
+/// The classic rational bias, not a power curve. A power curve is lopsided:
+/// bending up by some amount and down by the same amount give shapes that are
+/// not mirror images, so the handle feels like it pulls harder one way. This one
+/// satisfies `bend(1 - t, -tension) == 1 - bend(t, tension)` exactly, which is
+/// what "balanced" means here.
+///
+/// It also puts the midpoint exactly where the tension says: `bend(0.5, k)` is
+/// `0.5 + k / 2`. That is what lets the editor's drag handle solve for a tension
+/// directly from the pointer instead of creeping towards it.
 fn bend(t: f32, tension: f32) -> f32 {
     if tension.abs() < 1e-4 {
         return t;
     }
-    let exponent = 2f32.powf(-tension.clamp(-1.0, 1.0) * MAX_BEND_EXPONENT);
-    t.powf(exponent)
+    // Height the curve passes through at the halfway point, kept off both ends
+    // so the curve stays a curve rather than collapsing into a corner.
+    let midpoint = (0.5 + tension.clamp(-1.0, 1.0) * 0.5).clamp(MIN_MIDPOINT, 1.0 - MIN_MIDPOINT);
+    let shape = 1.0 / midpoint - 2.0;
+    t / (shape * (1.0 - t) + 1.0)
 }
 
 #[cfg(test)]
@@ -421,6 +437,52 @@ mod tests {
         assert!(bend(0.5, 0.6) > 0.5);
         assert!(bend(0.5, -0.6) < 0.5);
         assert!((bend(0.5, 0.0) - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn bending_up_and_down_are_mirror_images() {
+        // The complaint that started this: a power curve pulls harder one way, so
+        // dragging a handle up and down by the same amount gave shapes that were
+        // not reflections of each other.
+        for tension in [0.15, 0.4, 0.75, 0.95] {
+            for step in 0..=20 {
+                let t = step as f32 / 20.0;
+                let up = bend(t, tension);
+                let down = bend(1.0 - t, -tension);
+                assert!(
+                    (up - (1.0 - down)).abs() < 1e-5,
+                    "tension {tension} at t={t} was lopsided: {up} vs {}",
+                    1.0 - down
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_midpoint_of_a_bend_is_the_tension_itself() {
+        // This is what lets the editor solve for a tension straight from where
+        // the pointer is, rather than nudging towards it.
+        for tension in [-0.9, -0.5, -0.2, 0.0, 0.2, 0.5, 0.9] {
+            let expected = 0.5 + tension * 0.5;
+            assert!(
+                (bend(0.5, tension) - expected).abs() < 1e-5,
+                "tension {tension} put the midpoint at {}",
+                bend(0.5, tension)
+            );
+        }
+    }
+
+    #[test]
+    fn a_bent_segment_still_only_goes_one_way() {
+        for tension in [-1.0, -0.6, -0.1, 0.1, 0.6, 1.0] {
+            let mut previous = bend(0.0, tension);
+            for step in 1..=200 {
+                let value = bend(step as f32 / 200.0, tension);
+                assert!(value >= previous - 1e-6, "tension {tension} doubled back at step {step}");
+                assert!((0.0..=1.0).contains(&value), "tension {tension} left range: {value}");
+                previous = value;
+            }
+        }
     }
 
     #[test]

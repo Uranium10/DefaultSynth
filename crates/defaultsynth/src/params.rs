@@ -198,6 +198,18 @@ pub enum ModDestSlotParam {
     #[name = "OSC C Level"]
     OscCLevel,
     Detune,
+    #[name = "OSC A Detune"]
+    OscADetune,
+    #[name = "OSC B Detune"]
+    OscBDetune,
+    #[name = "OSC C Detune"]
+    OscCDetune,
+    #[name = "OSC A Pan"]
+    OscAPan,
+    #[name = "OSC B Pan"]
+    OscBPan,
+    #[name = "OSC C Pan"]
+    OscCPan,
 }
 
 impl ModDestSlotParam {

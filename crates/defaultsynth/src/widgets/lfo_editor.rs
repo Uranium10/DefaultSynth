@@ -196,14 +196,12 @@ impl LfoEditor {
         if span.abs() < FLAT_SEGMENT {
             return None;
         }
-        // Fraction of the segment's rise the midpoint should sit at. Clamped off
-        // both ends: the curve can approach them but never reach them, and the
-        // logarithms below are undefined there.
-        let fraction = ((target - start.y) / span).clamp(0.02, 0.98);
-        // The bend is `t^e` with `e = 2^(-3 * tension)`, so at t = 0.5 the
-        // midpoint is `0.5^e = fraction`. Undo both steps.
-        let exponent = -fraction.log2();
-        Some((-exponent.log2() / 3.0).clamp(-1.0, 1.0))
+        // Fraction of the segment's rise the midpoint should sit at.
+        let fraction = (target - start.y) / span;
+        // The bend puts its midpoint at `0.5 + tension / 2`, so this is the whole
+        // inversion. Nothing iterative, nothing accumulated: the curve lands under
+        // the pointer on the first frame and stays there.
+        Some(((fraction - 0.5) * 2.0).clamp(-1.0, 1.0))
     }
 
     fn end_drag(&mut self, cx: &mut EventContext) {

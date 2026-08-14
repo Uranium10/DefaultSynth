@@ -26,8 +26,15 @@ use nih_plug_vizia::vizia::prelude::*;
 use nih_plug_vizia::{assets, create_vizia_editor, ViziaState, ViziaTheming};
 use std::sync::Arc;
 
-use crate::params::{DefaultSynthParams, EnvParams, FilterParams, LfoParams, LfoShapeParam, OscParams};
-use crate::widgets::{AbSlider, CurveBox, EnvelopeDisplay, FilterResponse, Field, Knob, LfoEditor, ParamDropdown, PowerDot, RadioDot, WaveDisplay};
+use crate::params::{
+    DefaultSynthParams, EnvParams, FilterParams, LfoParams, LfoShapeParam, ModDestSlotParam,
+    ModSourceSlotParam, OscParams,
+};
+use crate::widgets::{
+    routed_mask_of, AbSlider, CurveBox, DropTarget, EnvelopeDisplay, FilterResponse, Field, Knob, LfoEditor, ModDot,
+    ModDragEvent, ModHandle, ModRouter, ModRoutingChanged, ParamDropdown, PowerDot, RadioDot,
+    WaveDisplay,
+};
 
 // ---- Scale -------------------------------------------------------------
 
@@ -76,6 +83,8 @@ const KNOB_CELL: f32 = d(213.0);
 const FIELD_H: f32 = d(60.0);
 const HEADER_H: f32 = d(78.0);
 const DOT_ROW_H: f32 = d(56.0);
+/// Grab area of the ring beside a knob, and of the drag handle on a tab.
+const MOD_DOT_HIT: f32 = d(58.0);
 
 pub fn default_state() -> Arc<ViziaState> {
     ViziaState::new(|| (WINDOW_WIDTH as u32, WINDOW_HEIGHT as u32))
@@ -91,6 +100,11 @@ struct EditorData {
     env_tab: usize,
     lfo_tab: usize,
     page: usize,
+    /// The modulation source being dragged, if the pointer is carrying one.
+    mod_drag: Option<ModSourceSlotParam>,
+    /// One bit per destination that has something routed to it, kept up to date
+    /// by the router. This is what decides whether a knob's ring is lit.
+    routed: u32,
 }
 
 enum EditorEvent {
@@ -106,6 +120,24 @@ impl Model for EditorData {
             EditorEvent::SelectLfo(index) => self.lfo_tab = *index,
             EditorEvent::SelectPage(index) => self.page = *index,
         });
+
+        event.map(|drag_event, _| match drag_event {
+            ModDragEvent::Begin(source) => self.mod_drag = Some(*source),
+            ModDragEvent::End => self.mod_drag = None,
+        });
+
+        event.map(|routing, _| {
+            let ModRoutingChanged::Mask(mask) = routing;
+            self.routed = *mask;
+        });
+
+        // Every release ends a drag, wherever it landed. A drop on a ring is
+        // handled by that ring first, on its way up to here.
+        event.map(|window_event, _| {
+            if matches!(window_event, WindowEvent::MouseUp(MouseButton::Left)) {
+                self.mod_drag = None;
+            }
+        });
     }
 }
 
@@ -120,16 +152,27 @@ pub fn create(params: Arc<DefaultSynthParams>, state: Arc<ViziaState>) -> Option
         cx.add_stylesheet(include_style!("src/theme.css"))
             .expect("the bundled stylesheet should always parse");
 
-        EditorData { params: params.clone(), env_tab: 0, lfo_tab: 0, page: 0 }.build(cx);
+        EditorData {
+            routed: routed_mask_of(&params),
+            params: params.clone(),
+            env_tab: 0,
+            lfo_tab: 0,
+            page: 0,
+            mod_drag: None,
+        }
+        .build(cx);
 
         VStack::new(cx, |cx| {
+            // Draws nothing; it owns the matrix parameters so the drop targets do
+            // not each have to. Built first so it is in place before any of them.
+            ModRouter::new(cx, EditorData::params).height(Pixels(0.0)).width(Pixels(0.0));
             title_bar(cx);
 
             HStack::new(cx, |cx| {
                 VStack::new(cx, |cx| {
-                    osc_panel(cx, "OSC A", |params| &params.osc_a);
-                    osc_panel(cx, "OSC B", |params| &params.osc_b);
-                    osc_panel(cx, "OSC C", |params| &params.osc_c);
+                    osc_panel(cx, "OSC A", OSC_DESTS[0], |params| &params.osc_a);
+                    osc_panel(cx, "OSC B", OSC_DESTS[1], |params| &params.osc_b);
+                    osc_panel(cx, "OSC C", OSC_DESTS[2], |params| &params.osc_c);
                 })
                 .row_between(Pixels(PANEL_GAP))
                 .width(Pixels(OSC_W));
@@ -208,9 +251,35 @@ fn title_bar(cx: &mut Context) {
 
 // ---- Oscillator panels -------------------------------------------------
 
+/// Which knobs in an oscillator panel carry a modulation ring, per oscillator.
+///
+/// Straight from the design: DETUNE, WARP, PAN and VOLUME have a ring; PHASE,
+/// RAND, BLEND and FILTER do not.
+const OSC_DESTS: [[ModDestSlotParam; 4]; 3] = [
+    [
+        ModDestSlotParam::OscADetune,
+        ModDestSlotParam::OscAWarp,
+        ModDestSlotParam::OscAPan,
+        ModDestSlotParam::OscALevel,
+    ],
+    [
+        ModDestSlotParam::OscBDetune,
+        ModDestSlotParam::OscBWarp,
+        ModDestSlotParam::OscBPan,
+        ModDestSlotParam::OscBLevel,
+    ],
+    [
+        ModDestSlotParam::OscCDetune,
+        ModDestSlotParam::OscCWarp,
+        ModDestSlotParam::OscCPan,
+        ModDestSlotParam::OscCLevel,
+    ],
+];
+
 fn osc_panel(
     cx: &mut Context,
     title: &'static str,
+    dests: [ModDestSlotParam; 4],
     select: impl Fn(&Arc<DefaultSynthParams>) -> &OscParams + Copy + 'static,
 ) {
     VStack::new(cx, move |cx| {
@@ -273,12 +342,12 @@ fn osc_panel(
             // DETUNE / BLEND over WARP / FILTER.
             VStack::new(cx, move |cx| {
                 HStack::new(cx, move |cx| {
-                    knob_cell(cx, "DETUNE", move |params| &select(params).detune);
+                    mod_knob_cell(cx, "DETUNE", dests[0], move |params| &select(params).detune);
                     knob_cell(cx, "BLEND", move |params| &select(params).blend);
                 })
                 .height(Pixels(KNOB_CELL));
                 HStack::new(cx, move |cx| {
-                    knob_cell(cx, "WARP", move |params| &select(params).warp);
+                    mod_knob_cell(cx, "WARP", dests[1], move |params| &select(params).warp);
                     knob_cell(cx, "FILTER", move |params| &select(params).mod_amount);
                 })
                 .height(Pixels(KNOB_CELL));
@@ -300,8 +369,8 @@ fn osc_panel(
             .width(Pixels(KNOB_COL * 2.0));
 
             VStack::new(cx, move |cx| {
-                knob_cell(cx, "PAN", move |params| &select(params).pan);
-                knob_cell(cx, "VOLUME", move |params| &select(params).level);
+                mod_knob_cell(cx, "PAN", dests[2], move |params| &select(params).pan);
+                mod_knob_cell(cx, "VOLUME", dests[3], move |params| &select(params).level);
             })
             .width(Pixels(KNOB_COL));
         })
@@ -319,11 +388,15 @@ const ENV_TABS: [&str; 3] = ["ENV 1", "ENV 2", "ENV 3"];
 fn env_panel(cx: &mut Context) {
     VStack::new(cx, |cx| {
         HStack::new(cx, |cx| {
+            const ENV_SOURCES: [ModSourceSlotParam; 3] = [
+                ModSourceSlotParam::AmpEnv,
+                ModSourceSlotParam::FilterEnv,
+                ModSourceSlotParam::ModEnv,
+            ];
             for (index, name) in ENV_TABS.iter().enumerate() {
-                Button::new(cx, move |cx| cx.emit(EditorEvent::SelectEnv(index)), |cx| Label::new(cx, *name))
-                    .class("strip-tab")
-                    .checked(EditorData::env_tab.map(move |tab| *tab == index))
-                    .width(Stretch(1.0));
+                mod_tab(cx, name, ENV_SOURCES[index], EditorData::env_tab.map(move |tab| *tab == index), move |cx| {
+                    cx.emit(EditorEvent::SelectEnv(index))
+                });
             }
         })
         .col_between(Pixels(d(6.0)))
@@ -367,11 +440,16 @@ const LFO_TABS: [&str; 4] = ["LFO 1", "LFO 2", "LFO 3", "LFO 4"];
 fn lfo_panel(cx: &mut Context) {
     VStack::new(cx, |cx| {
         HStack::new(cx, |cx| {
+            const LFO_SOURCES: [ModSourceSlotParam; 4] = [
+                ModSourceSlotParam::Lfo1,
+                ModSourceSlotParam::Lfo2,
+                ModSourceSlotParam::Lfo3,
+                ModSourceSlotParam::Lfo4,
+            ];
             for (index, name) in LFO_TABS.iter().enumerate() {
-                Button::new(cx, move |cx| cx.emit(EditorEvent::SelectLfo(index)), |cx| Label::new(cx, *name))
-                    .class("strip-tab")
-                    .checked(EditorData::lfo_tab.map(move |tab| *tab == index))
-                    .width(Stretch(1.0));
+                mod_tab(cx, name, LFO_SOURCES[index], EditorData::lfo_tab.map(move |tab| *tab == index), move |cx| {
+                    cx.emit(EditorEvent::SelectLfo(index))
+                });
             }
         })
         .col_between(Pixels(d(6.0)))
@@ -527,8 +605,17 @@ fn filter_panel(cx: &mut Context, title: &'static str, is_a: bool) {
 
             VStack::new(cx, move |cx| {
                 HStack::new(cx, move |cx| {
-                    knob_cell(cx, "CUT", move |params| &select(params).cutoff);
-                    knob_cell(cx, "RES", move |params| &select(params).resonance);
+                    let cutoff = if is_a { ModDestSlotParam::FilterACutoff } else { ModDestSlotParam::FilterBCutoff };
+                    mod_knob_cell(cx, "CUT", cutoff, move |params| &select(params).cutoff);
+                    // Only filter A's resonance is reachable from the matrix so
+                    // far, so filter B's knob gets no ring rather than a dead one.
+                    if is_a {
+                        mod_knob_cell(cx, "RES", ModDestSlotParam::FilterAResonance, move |params| {
+                            &select(params).resonance
+                        });
+                    } else {
+                        knob_cell(cx, "RES", move |params| &select(params).resonance);
+                    }
                     knob_cell(cx, "PAN", move |params| &select(params).pan);
                 })
                 .height(Pixels(KNOB_CELL));
@@ -580,8 +667,8 @@ fn voicing_panel(cx: &mut Context) {
                     .class("readout")
                     .height(Pixels(FIELD_H));
                 HStack::new(cx, |cx| {
-                    curve_cell(cx, "NOTE", |params| &params.voicing.note_curve);
-                    curve_cell(cx, "VELO", |params| &params.voicing.velocity_curve);
+                    curve_cell(cx, "NOTE", ModSourceSlotParam::KeyTrack, |params| &params.voicing.note_curve);
+                    curve_cell(cx, "VELO", ModSourceSlotParam::Velocity, |params| &params.voicing.velocity_curve);
                 })
                 .col_between(Pixels(d(20.0)))
                 .height(Stretch(1.0));
@@ -613,6 +700,71 @@ fn mode_dot(cx: &mut Context, label: &'static str, mode: crate::params::VoiceMod
 // ---- Cells -------------------------------------------------------------
 
 /// Dial with its readout and caption underneath.
+/// One tab of an ENV or LFO strip: its name, and the drag handle from the design.
+///
+/// The handle is what carries this envelope or LFO onto a knob, so it lives on
+/// the tab that names it rather than anywhere a legend would have to explain.
+fn mod_tab<L>(
+    cx: &mut Context,
+    name: &'static str,
+    source: ModSourceSlotParam,
+    selected: L,
+    on_select: impl Fn(&mut EventContext) + 'static,
+) where
+    L: Lens<Target = bool>,
+{
+    Button::new(cx, on_select, move |cx| {
+        HStack::new(cx, move |cx| {
+            Label::new(cx, name).class("strip-tab-name");
+            Element::new(cx).width(Stretch(1.0));
+            ModHandle::new(cx, source)
+                .class("mod-handle")
+                .width(Pixels(MOD_DOT_HIT))
+                .height(Pixels(MOD_DOT_HIT))
+                .top(Stretch(1.0))
+                .bottom(Stretch(1.0));
+        })
+        // Sized here rather than in the stylesheet: the handle has to end up
+        // against the tab's right edge, which needs the row to fill the tab.
+        .class("strip-tab-row")
+        .width(Stretch(1.0))
+        .height(Stretch(1.0))
+    })
+    .class("strip-tab")
+    .checked(selected)
+    // The stylesheet centres a plain tab's contents; this one is a row that has
+    // to fill the tab, so its insets are set here where they beat that rule.
+    .child_left(Pixels(d(22.0)))
+    .child_right(Pixels(d(18.0)))
+    .child_top(Pixels(0.0))
+    .child_bottom(Pixels(0.0))
+    .width(Stretch(1.0));
+}
+
+/// A knob that a modulation source can be dropped onto.
+///
+/// The ring sits over the knob's upper-left corner, as in the design. It only
+/// takes pointer events while a source is being carried; the rest of the time it
+/// is invisible to the mouse so the knob underneath still turns.
+fn mod_knob_cell<P, FMap>(cx: &mut Context, label: &'static str, destination: ModDestSlotParam, select: FMap)
+where
+    P: Param + 'static,
+    FMap: Fn(&Arc<DefaultSynthParams>) -> &P + Copy + 'static,
+{
+    VStack::new(cx, move |cx| {
+        knob_cell(cx, label, select);
+        ModDot::new(cx, destination, EditorData::mod_drag, EditorData::routed)
+            .class("mod-dot")
+            .position_type(PositionType::SelfDirected)
+            .left(Pixels(0.0))
+            .top(Pixels(0.0))
+            .width(Pixels(MOD_DOT_HIT))
+            .height(Pixels(MOD_DOT_HIT))
+            .pointer_events(EditorData::mod_drag.map(|drag| DropTarget(drag.is_some())));
+    })
+    .width(Stretch(1.0));
+}
+
 fn knob_cell<P, FMap>(cx: &mut Context, label: &'static str, select: FMap)
 where
     P: Param + 'static,
@@ -655,11 +807,21 @@ where
 }
 
 /// A small response curve with its caption, as used by NOTE and VELO.
-fn curve_cell<FMap>(cx: &mut Context, label: &'static str, select: FMap)
+/// A NOTE or VELO curve box.
+///
+/// Key tracking and velocity are modulation sources, so the design puts a drag
+/// handle above each box rather than a ring beside it.
+fn curve_cell<FMap>(cx: &mut Context, label: &'static str, source: ModSourceSlotParam, select: FMap)
 where
     FMap: Fn(&Arc<DefaultSynthParams>) -> &FloatParam + Copy + 'static,
 {
     VStack::new(cx, move |cx| {
+        ModHandle::new(cx, source)
+            .class("mod-handle")
+            .width(Pixels(MOD_DOT_HIT))
+            .height(Pixels(MOD_DOT_HIT))
+            .left(Stretch(1.0))
+            .right(Stretch(1.0));
         CurveBox::new(cx, EditorData::params.map(move |params| select(params).value()))
             .class("display-well")
             .height(Stretch(1.0));

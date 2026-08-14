@@ -1,7 +1,10 @@
 //! AHDSR envelope generator matching the UI's ATTACK / HOLD / DECAY / SUSTAIN / RELEASE.
 //!
-//! Stages use exponential curves rather than straight lines because linear
-//! decays sound unnaturally abrupt; analogue envelopes are RC curves.
+//! The decay and release are exponential, because linear ones sound unnaturally
+//! abrupt and analogue envelopes are RC curves. The attack is a straight line:
+//! that is what the design draws, and an exponential rise spends nearly all of
+//! its time already near the top, so past the first few milliseconds the knob
+//! stops feeling like it controls anything.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Stage {
@@ -55,7 +58,8 @@ impl EnvelopeSettings {
             Stage::Idle => 0.0,
             // A zero-length stage is already at its destination.
             Stage::Attack if self.attack <= f32::EPSILON => 1.0,
-            Stage::Attack => 1.0 - exp_fall(t),
+            // A straight rise, unlike the falling stages. See the module comment.
+            Stage::Attack => t,
             Stage::Hold => 1.0,
             Stage::Decay if self.decay <= f32::EPSILON => self.sustain,
             Stage::Decay => self.sustain + (1.0 - self.sustain) * exp_fall(t),
@@ -140,7 +144,6 @@ impl Envelope {
         match self.stage {
             Stage::Idle => self.value = 0.0,
             Stage::Attack => {
-                // Inverted exponential: fast at first, easing into the peak.
                 self.value = settings.stage_level(Stage::Attack, elapsed / settings.attack);
                 if elapsed >= settings.attack {
                     self.value = 1.0;
@@ -222,6 +225,19 @@ mod tests {
         }
         assert_eq!(env.stage(), Stage::Sustain);
         assert!((env.value() - config.sustain).abs() < 1e-4);
+    }
+
+    #[test]
+    fn the_attack_is_a_straight_line() {
+        // The design draws it straight, and it is what the ATTACK knob has to
+        // feel like: an exponential rise is already near the top a fraction of
+        // the way in, so most of the knob's travel would do nothing visible.
+        let config = EnvelopeSettings { attack: 1.0, ..settings() };
+        for step in 0..=10 {
+            let t = step as f32 / 10.0;
+            let level = config.stage_level(Stage::Attack, t);
+            assert!((level - t).abs() < 1e-6, "attack bent at {t}: {level}");
+        }
     }
 
     #[test]

@@ -82,8 +82,16 @@ pub enum ModDest {
     OscALevel,
     OscBLevel,
     OscCLevel,
-    /// Unison detune spread in cents, +/- 100.
+    /// Unison detune spread in cents, +/- 100, on every oscillator at once.
     Detune,
+    /// Unison detune spread on one oscillator, in cents.
+    OscADetune,
+    OscBDetune,
+    OscCDetune,
+    /// Pan of one oscillator, +/- 1.
+    OscAPan,
+    OscBPan,
+    OscCPan,
 }
 
 impl ModDest {
@@ -102,6 +110,12 @@ impl ModDest {
             11 => Self::OscBLevel,
             12 => Self::OscCLevel,
             13 => Self::Detune,
+            14 => Self::OscADetune,
+            15 => Self::OscBDetune,
+            16 => Self::OscCDetune,
+            17 => Self::OscAPan,
+            18 => Self::OscBPan,
+            19 => Self::OscCPan,
             _ => Self::None,
         }
     }
@@ -112,7 +126,7 @@ impl ModDest {
             Self::None => 0.0,
             Self::Pitch => 24.0,
             Self::FilterACutoff | Self::FilterBCutoff => 4.0,
-            Self::Detune => 100.0,
+            Self::Detune | Self::OscADetune | Self::OscBDetune | Self::OscCDetune => 100.0,
             _ => 1.0,
         }
     }
@@ -176,6 +190,10 @@ pub struct ModOutputs {
     pub osc_warp: [f32; 3],
     pub osc_level: [f32; 3],
     pub detune_cents: f32,
+    /// Per-oscillator detune in cents, on top of [`Self::detune_cents`].
+    pub osc_detune: [f32; 3],
+    /// Per-oscillator pan, on top of [`Self::pan`].
+    pub osc_pan: [f32; 3],
 }
 
 /// Adds up every slot into a single set of offsets.
@@ -204,6 +222,12 @@ pub fn apply(slots: &[ModSlot; MOD_SLOTS], inputs: &ModInputs) -> ModOutputs {
             ModDest::OscBLevel => out.osc_level[1] += offset,
             ModDest::OscCLevel => out.osc_level[2] += offset,
             ModDest::Detune => out.detune_cents += offset,
+            ModDest::OscADetune => out.osc_detune[0] += offset,
+            ModDest::OscBDetune => out.osc_detune[1] += offset,
+            ModDest::OscCDetune => out.osc_detune[2] += offset,
+            ModDest::OscAPan => out.osc_pan[0] += offset,
+            ModDest::OscBPan => out.osc_pan[1] += offset,
+            ModDest::OscCPan => out.osc_pan[2] += offset,
         }
     }
     out
@@ -268,7 +292,7 @@ mod tests {
     fn every_destination_index_round_trips() {
         // The editor and the host talk to these by index, so a gap would silently
         // move every row below it to a different destination.
-        for index in 0..=13 {
+        for index in 0..=19 {
             let dest = ModDest::from_index(index);
             if index == 0 {
                 assert_eq!(dest, ModDest::None);

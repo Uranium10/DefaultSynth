@@ -152,7 +152,7 @@ fn matrix_enum_indices_match_the_dsp_ones() {
     // Every variant must be reachable: a matrix row that cannot select a
     // destination is a row the player cannot use.
     assert_eq!(ModSourceSlotParam::variants().len(), 11);
-    assert_eq!(ModDestSlotParam::variants().len(), 14);
+    assert_eq!(ModDestSlotParam::variants().len(), 20);
     // Six built-in shapes plus the drawn one.
     assert_eq!(LfoShapeParam::variants().len(), 7);
     for index in 0..LfoShapeParam::variants().len() {

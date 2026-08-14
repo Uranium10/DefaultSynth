@@ -301,6 +301,33 @@ param-dropdown {
     color: #06222c;
 }
 
+/* ---- Modulation drag ------------------------------------------------- */
+
+/*
+ * The four-way handle on each ENV and LFO tab, and above the NOTE and VELO
+ * boxes. `color` draws it; drag it onto a knob's ring to route that source.
+ */
+mod-handle {
+    width: 16px;
+    color: #6f6f6f;
+    cursor: hand;
+}
+
+mod-handle:hover {
+    color: #15d8ff;
+}
+
+/*
+ * The ring at a knob's upper left. border-color is the unrouted state and
+ * selection-color the routed one, matching the grey and cyan rings in the
+ * design. It only takes the pointer while a source is being dragged, which is
+ * set from the editor rather than here.
+ */
+mod-dot {
+    border-color: #8a8a8a;
+    selection-color: #15d8ff;
+}
+
 /* ---- Tabs and preset bar --------------------------------------------- */
 
 .page-tab, .strip-tab {
@@ -310,6 +337,20 @@ param-dropdown {
     child-space: 1s;
     border-radius: 3px;
     border-width: 0px;
+}
+
+/* An ENV or LFO tab carries its drag handle, so its contents are a row: name on
+ * the left, handle on the right, as the design has them. The insets are set in
+ * editor.rs, where they override the centring above. */
+.strip-tab-row {
+    width: 1s;
+    height: 1s;
+    col-between: 4px;
+}
+
+.strip-tab-name {
+    top: 1s;
+    bottom: 1s;
 }
 
 .page-tab:hover, .strip-tab:hover {

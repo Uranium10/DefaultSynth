@@ -125,7 +125,11 @@ impl EnvelopeDisplay {
             }
         };
         let attack_w = share(settings.attack);
-        let hold_w = share(settings.hold);
+        // Hold alone collapses to nothing when it is zero rather than keeping a
+        // minimum sliver. The other stages keep theirs so their handles stay
+        // grabbable, but hold's handle is hidden at zero, so a sliver would only
+        // leave a plateau in the curve with nothing to explain it.
+        let hold_w = if settings.hold <= f32::EPSILON { 0.0 } else { share(settings.hold) };
         let decay_w = share(settings.decay);
         let release_w = share(settings.release);
 
@@ -147,13 +151,19 @@ impl EnvelopeDisplay {
         }
     }
 
-    fn handle_positions(&self, layout: &Layout) -> [(Grip, f32, f32); 4] {
-        [
-            (Grip::Attack, layout.attack_x, layout.level_to_y(1.0)),
-            (Grip::Hold, layout.hold_x, layout.level_to_y(1.0)),
-            (Grip::DecaySustain, layout.decay_x, layout.level_to_y(layout.sustain)),
-            (Grip::Release, layout.release_x, layout.level_to_y(0.0)),
-        ]
+    /// The handles that are currently on screen.
+    ///
+    /// Hold drops out at zero: it would sit exactly on top of the attack handle,
+    /// so all it could do is intercept drags meant for the attack. The HOLD knob
+    /// under the well is still there to bring it back.
+    fn handle_positions(&self, layout: &Layout) -> Vec<(Grip, f32, f32)> {
+        let mut handles = vec![(Grip::Attack, layout.attack_x, layout.level_to_y(1.0))];
+        if self.hold.unmodulated_plain_value() > f32::EPSILON {
+            handles.push((Grip::Hold, layout.hold_x, layout.level_to_y(1.0)));
+        }
+        handles.push((Grip::DecaySustain, layout.decay_x, layout.level_to_y(layout.sustain)));
+        handles.push((Grip::Release, layout.release_x, layout.level_to_y(0.0)));
+        handles
     }
 
     fn param_for(&self, grip: Grip) -> &ParamWidgetBase {

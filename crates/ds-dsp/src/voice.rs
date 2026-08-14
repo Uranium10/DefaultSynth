@@ -348,10 +348,11 @@ impl Voice {
             let note = self.current_note + config.octave as f32 * 12.0 + modulation.pitch_semitones;
             let frequency = midi_note_to_hz(note) * crate::oscillator::cents_to_ratio(config.fine_cents);
             osc.set_warp(config.warp + modulation.osc_warp[index]);
-            let detune = (config.detune_cents + modulation.detune_cents).max(0.0);
+            let detune = (config.detune_cents + modulation.detune_cents + modulation.osc_detune[index]).max(0.0);
             let (mut left, mut right) = osc.process(frequency, detune);
             let level = (config.level + modulation.osc_level[index]).clamp(0.0, 2.0);
-            let (pan_left, pan_right) = equal_power_pan(config.pan + modulation.pan);
+            let (pan_left, pan_right) =
+                equal_power_pan(config.pan + modulation.pan + modulation.osc_pan[index]);
             left *= level * pan_left;
             right *= level * pan_right;
 
@@ -684,13 +685,16 @@ mod tests {
         voice.start(60, 1.0, 0, 0, &config, None, 0.0, SAMPLE_RATE, 0, &mut rng);
         let mut early = 0.0f32;
         let mut late = 0.0f32;
-        for index in 0..8_000 {
+        // The attack is a straight line, so the window has to sit past its full
+        // 0.2 s rather than where an exponential would already have arrived.
+        let attack_samples = (0.2 * SAMPLE_RATE) as usize;
+        for index in 0..attack_samples * 2 {
             let (left, _) = voice.process(&config);
             // Before the mod envelope has risen the level is untouched; once it
             // reaches its sustain the -1.0 row has pulled the voice to silence.
             if index < 400 {
                 early = early.max(left.abs());
-            } else if index > 6_000 {
+            } else if index > attack_samples + 400 {
                 late = late.max(left.abs());
             }
         }
