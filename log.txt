@@ -91,3 +91,9 @@
 - 셀렉터에 마우스를 올리면 가운데 흰 라운딩 박스가 생기던 문제의 원인을 찾음. `ViziaTheming::Custom`을 "테마 없음"으로 잘못 이해하고 있었으나 실제로는 nih_plug_vizia의 테마를 VIZIA 내장 스타일시트 위에 얹는 옵션이며, 그 기본 스타일이 디자인에 없는 장식을 그리고 있었음. 이 에디터는 theme.css로 모든 것을 직접 칠하므로 `ViziaTheming::None`으로 바꿔 내장 테마를 완전히 껐음. 흰 박스가 사라지고 폰트 두께도 nih_plug_vizia의 font-weight 오버라이드에서 벗어남.
 - 드롭다운 목록의 글자가 잘리던 문제("FM (B", "SYNC")는 팝업 폭이 셀렉터를 따라가 좁아진 탓이라 가장 긴 항목이 들어가도록 폭을 명시함.
 - 검증: 워크스페이스 테스트 68개 통과, cargo check 경고 0, CLAP·VST3·스탠드얼론 빌드 성공. 실행 화면에서 흰 박스가 사라진 것을 확인함.
+
+## 2026-08-14 11:40:00 +09:00
+- 빌드 캐시를 점검하고 정리함. 정리 전 합계 13.5 GB였고 DefaultSynth의 target이 8.5 GB로 대부분을 차지했으며 그중 debug 프로필만 6.8 GB였음.
+- 삭제한 것: C:\tmp\defaultsynth-target\debug(6.81 GB, cargo test가 재생성), C:\tmp\nih-ref-target(0.32 GB, 검사기 대조군으로 한 번 빌드한 NIH-plug gain 예제), C:\tmp\nih-ref(NIH-plug 소스 복사본), C:\tmp\clap-validator-build(0.16 GB, 도구 자체는 ~/.cargo/bin에 설치됨), C:\tmp\nih-probe(네트워크 확인용 임시 크레이트). 합계 7.29 GB 회수.
+- 남긴 것: release 프로필과 bundled(스탠드얼론 실행 파일과 .clap/.vst3가 그 안에 있어 지우면 재빌드가 필요함), cargo registry/git 캐시, 그리고 코덱스가 지금 사용 중인 C:\tmp\minidaw-msvc-target은 건드리지 않음.
+- README에 캐시 위치와 각 항목을 지워도 되는지, 가장 큰 것만 비우는 명령을 표로 정리함.

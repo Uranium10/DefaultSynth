@@ -92,9 +92,32 @@ run.bat
 ### 검증
 
 ```bash
-cargo test                                   # DSP 48개 + 파라미터 4개
+cargo test                                   # DSP 53개 + 플러그인 15개
 clap-validator validate <경로>/DefaultSynth.clap
 ```
+
+### 빌드 캐시 정리
+
+Rust 빌드 캐시는 금방 몇 기가씩 불어납니다. 전부 재생성되는 파생물이므로
+언제든 지워도 됩니다. 단, Cargo나 실행 중인 플러그인이 파일을 잡고 있으면
+삭제가 실패하니 먼저 닫으세요.
+
+| 경로 | 내용 | 지워도 되나 |
+| --- | --- | --- |
+| `C:\tmp\defaultsynth-target\debug` | `cargo test`/`cargo check` 산출물. 가장 크게 자랍니다 | 예, 다음 테스트에서 재생성 |
+| `C:\tmp\defaultsynth-target\release` | 릴리스 빌드와 스탠드얼론 실행 파일 | 예, 다음 빌드에서 재생성(수 분 소요) |
+| `C:\tmp\defaultsynth-target\bundled` | 완성된 `.clap` / `.vst3` | 지우면 다시 번들해야 합니다 |
+| `%USERPROFILE%\.cargo\registry` | 내려받은 크레이트 소스와 압축 파일 | 예, 다시 받습니다(네트워크 필요) |
+| `%USERPROFILE%\.cargo\git` | git 의존성 체크아웃(NIH-plug, VIZIA) | 예, 다시 받습니다 |
+
+가장 큰 것만 빠르게 비우려면:
+
+```bat
+rmdir /S /Q "C:\tmp\defaultsynth-target\debug"
+```
+
+전체를 비우려면 `C:\tmp\defaultsynth-target` 폴더째 지우면 됩니다. 다음
+`build.bat` 실행 때 처음부터 다시 만들어집니다.
 
 ## 구조
 
