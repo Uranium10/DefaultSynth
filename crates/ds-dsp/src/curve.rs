@@ -46,15 +46,21 @@ pub struct LfoCurve {
 
 impl Default for LfoCurve {
     fn default() -> Self {
-        Self::ramp_down()
+        Self::peak()
     }
 }
 
 impl LfoCurve {
-    /// A falling ramp: the shape a new LFO starts on, and the one whose ends
-    /// most obviously have to agree.
-    pub fn ramp_down() -> Self {
-        Self::from_points(&[CurvePoint::new(0.0, 1.0), CurvePoint::new(1.0, 1.0)]).bent_first_segment(0.0)
+    /// A single rise and fall: up from the floor to the ceiling and back.
+    ///
+    /// The shape a new LFO starts on. Three points, both ends on the floor, so
+    /// what the well shows is also the simplest thing to start dragging.
+    pub fn peak() -> Self {
+        Self::from_points(&[
+            CurvePoint::new(0.0, 0.0),
+            CurvePoint::new(0.5, 1.0),
+            CurvePoint::new(1.0, 0.0),
+        ])
     }
 
     /// Builds a curve from a slice, sorting it and forcing the ends to agree.
@@ -79,11 +85,6 @@ impl LfoCurve {
         curve.points[..curve.len].sort_by(|a, b| a.x.total_cmp(&b.x));
         curve.normalise_ends();
         curve
-    }
-
-    fn bent_first_segment(mut self, tension: f32) -> Self {
-        self.points[0].tension = tension;
-        self
     }
 
     /// Pins the ends to the edges of the cycle and makes them agree.

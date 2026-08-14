@@ -243,3 +243,29 @@ fn a_drawn_curve_survives_being_saved_and_loaded() {
         );
     }
 }
+
+#[test]
+fn a_new_lfo_opens_on_an_editable_peak() {
+    use crate::params::LfoShapeParam;
+
+    let params = DefaultSynthParams::default();
+    for (index, (lfo, curve)) in [
+        (&params.lfo1, &params.lfo1_curve),
+        (&params.lfo2, &params.lfo2_curve),
+        (&params.lfo3, &params.lfo3_curve),
+        (&params.lfo4, &params.lfo4_curve),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        // Custom rather than a built-in shape: the well only lets you drag what
+        // it is already drawing, so a fixed shape would open uneditable.
+        assert_eq!(lfo.shape.value(), LfoShapeParam::Custom, "LFO {} did not start editable", index + 1);
+
+        let curve = curve.load();
+        assert_eq!(curve.len(), 3, "LFO {} did not start on three points", index + 1);
+        assert!(curve.sample(0.0) < 0.01, "LFO {} did not start on the floor", index + 1);
+        assert!(curve.sample(0.5) > 0.99, "LFO {} had no peak in the middle", index + 1);
+        assert!(curve.sample(1.0) < 0.01, "LFO {} did not come back down", index + 1);
+    }
+}

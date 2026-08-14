@@ -639,7 +639,9 @@ impl Default for LfoParams {
     fn default() -> Self {
         Self {
             trigger: EnumParam::new("Trigger", LfoTriggerParam::Trigger),
-            shape: EnumParam::new("Shape", LfoShapeParam::Sine),
+            // Custom, so a new LFO opens on the drawable curve rather than on a
+            // fixed shape the well would refuse to let you touch.
+            shape: EnumParam::new("Shape", LfoShapeParam::Custom),
             rate: FloatParam::new(
                 "Rate",
                 2.0,
@@ -825,10 +827,10 @@ impl Default for DefaultSynthParams {
             lfo2: LfoParams::default(),
             lfo3: LfoParams::default(),
             lfo4: LfoParams::default(),
-            lfo1_curve: Arc::new(AtomicCell::new(LfoCurve::from_shape(ds_dsp::LfoShape::Sine))),
-            lfo2_curve: Arc::new(AtomicCell::new(LfoCurve::from_shape(ds_dsp::LfoShape::Sine))),
-            lfo3_curve: Arc::new(AtomicCell::new(LfoCurve::from_shape(ds_dsp::LfoShape::Sine))),
-            lfo4_curve: Arc::new(AtomicCell::new(LfoCurve::from_shape(ds_dsp::LfoShape::Sine))),
+            lfo1_curve: Arc::new(AtomicCell::new(LfoCurve::peak())),
+            lfo2_curve: Arc::new(AtomicCell::new(LfoCurve::peak())),
+            lfo3_curve: Arc::new(AtomicCell::new(LfoCurve::peak())),
+            lfo4_curve: Arc::new(AtomicCell::new(LfoCurve::peak())),
             matrix: Default::default(),
             voicing: VoicingParams::default(),
             // The minimum must stay above zero: logarithmic smoothing interpolates

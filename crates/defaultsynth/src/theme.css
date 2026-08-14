@@ -247,48 +247,15 @@ envelope-display {
 
 /*
  * The design's long grey boxes are pickers, so they open a list rather than
- * scrub. `.selector` sizes the closed state; the popup is positioned by VIZIA
- * and floats above the panel it belongs to.
+ * scrub. `.selector` sizes the closed state; the list is placed by the widget
+ * itself and floats above the panel it belongs to.
  */
 param-dropdown {
     height: 1s;
-}
-
-.dropdown-root {
-    height: 1s;
-    background-color: transparent;
-    border-width: 0px;
+    cursor: hand;
 }
 
 /* The closed state: the current value filling the grey box. */
-.dropdown-root .title {
-    height: 1s;
-    background-color: transparent;
-    border-width: 0px;
-}
-
-/*
- * VIZIA already gives a popup self-directed positioning and a z-index, but the
- * default stylesheet is what normally hides it while closed. This editor uses
- * ViziaTheming::Custom, so without these two rules the shut popup still takes up
- * space and shows as a stray bar across the selector.
- */
-popup {
-    display: none;
-    top: 100%;
-    left: 0px;
-    /* Wide enough for the longest entry ("FM (B)", "1/128", "Triangle"); an auto
-     * width tracks the selector, which is narrow enough to clip them. */
-    width: 118px;
-    height: auto;
-    background-color: transparent;
-    border-width: 0px;
-}
-
-popup:checked {
-    display: flex;
-}
-
 .dropdown-value {
     width: 1s;
     height: 1s;
@@ -297,9 +264,18 @@ popup:checked {
     color: #9aecff;
 }
 
-/* VIZIA spells padding `child-space`; `padding` parses to nothing here. */
+/*
+ * The open list. `1s` makes it exactly as wide as the box it drops from, and
+ * min-width keeps the longest caption ("Triangle", "FM (B)") clear of the edges
+ * when the box itself is narrow.
+ *
+ * VIZIA spells padding `child-space`; `padding` parses to nothing here. The 3px
+ * inset and the 1px gap have to match LIST_PADDING and LIST_GAP in dropdown.rs,
+ * which is where the widget works out how tall the list will be.
+ */
 .dropdown-list {
     width: 1s;
+    min-width: 118px;
     height: auto;
     child-space: 3px;
     background-color: #5e5e5e;
@@ -310,13 +286,10 @@ popup:checked {
     row-between: 1px;
 }
 
+/* Centred, so an entry sits where the closed box was showing it. */
 .dropdown-item {
-    height: 22px;
     width: 1s;
-    child-left: 8px;
-    child-right: 8px;
-    child-top: 1s;
-    child-bottom: 1s;
+    child-space: 1s;
     border-radius: 3px;
     color: #eaf7fc;
     font-size: 11;
