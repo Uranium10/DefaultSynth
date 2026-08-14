@@ -277,10 +277,12 @@ popup {
     display: none;
     top: 100%;
     left: 0px;
-    /* An explicit size: with height auto the popup collapses and its list paints
-     * no background, leaving the entries floating over whatever is behind. */
-    width: 150px;
+    /* Wide enough for the longest entry ("FM (B)", "1/128", "Triangle"); an auto
+     * width tracks the selector, which is narrow enough to clip them. */
+    width: 118px;
     height: auto;
+    background-color: transparent;
+    border-width: 0px;
 }
 
 popup:checked {

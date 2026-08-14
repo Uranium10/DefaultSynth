@@ -108,7 +108,11 @@ impl Model for EditorData {
 }
 
 pub fn create(params: Arc<DefaultSynthParams>, state: Arc<ViziaState>) -> Option<Box<dyn Editor>> {
-    create_vizia_editor(state, ViziaTheming::Custom, move |cx, _| {
+    // ViziaTheming::None, not Custom. Custom *applies* NIH-plug's theming on top
+    // of VIZIA's built-in stylesheet, and those defaults were painting stray
+    // chrome the design does not have, such as a white pill inside the selectors
+    // on hover. Everything this editor draws is styled by theme.css instead.
+    create_vizia_editor(state, ViziaTheming::None, move |cx, _| {
         assets::register_noto_sans_light(cx);
         assets::register_noto_sans_thin(cx);
         cx.add_stylesheet(include_style!("src/theme.css"))
